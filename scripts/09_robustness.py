@@ -44,9 +44,11 @@ COLORS = {"LQR": "#2471a3", "LQR (sat.)": "#85c1e9", "DQN": "#c0392b", "PPO": "#
 def episode_row(ctrl, seed, noise, offset):
     r = run_episode(StationKeepingSim(seed=seed, noise=noise), ctrl, offset_km=offset)
     d = r["dist_km"]
+    late = d[r["t_days"] >= 182.5]                    # second half of the year
     return {"survived": r["survived"], "days_survived": r["days_survived"],
             "dv_mps": r["dv_total_mps"], "mean_dist_km": r["mean_dist_km"],
-            "rms_dist_km": float(np.sqrt(np.mean(d**2))), "max_dist_km": float(d.max())}
+            "rms_dist_km": float(np.sqrt(np.mean(d**2))), "max_dist_km": float(d.max()),
+            "rms_late_km": float(np.sqrt(np.mean(late**2))) if r["survived"] else float("nan")}
 
 
 def main():
@@ -94,47 +96,55 @@ def main():
 
     # ------------------------------------------------------------ summary
     def agg(sweep, scen, name, level, key):
+        """Mean of `key`; fuel and tracking error over the runs kept only."""
         v = [r[key] for r in rows if r["sweep"] == sweep and r["scenario"] == scen
-             and r["controller"] == name and r["level"] == level]
-        return float(np.mean(v))
+             and r["controller"] == name and r["level"] == level
+             and (key == "survived" or r["survived"])]
+        return float(np.mean(v)) if v else float("nan")
 
     panels = [("noise", "holding", NOISE_SCALES, "all errors x k (holding)"),
               ("noise", "acquisition", NOISE_SCALES, "all errors x k (recovery from 1,000 km)"),
               ("disturbance", "holding", DIST_SCALES, "unmodelled force x k (holding)"),
               ("offset", "acquisition", OFFSETS_KM, "start offset [km]")]
     for sweep, scen, levels, title in panels:
-        print(f"\n{title}")
+        print(f"\n{title}   [kept, delta-v of kept runs, RMS distance in days 183-365]")
         print(f"{'controller':<12}" + "".join(f"{lv:>22g}" for lv in levels))
         for name in ctrls:
             cells = []
             for lv in levels:
                 s = agg(sweep, scen, name, lv, "survived")
                 cells.append(f"{s:4.0%} {agg(sweep, scen, name, lv, 'dv_mps'):6.2f}m/s "
-                             f"{agg(sweep, scen, name, lv, 'rms_dist_km'):6.0f}km")
+                             f"{agg(sweep, scen, name, lv, 'rms_late_km'):6.1f}km")
             print(f"{name:<12}" + "".join(f"{c:>22}" for c in cells))
 
     # ------------------------------------------------------------ figure
+    # k = 0 (no errors at all) is in the CSV and the table but not in the
+    # figure: LQR then needs ~1e-10 m/s, which would squash the log axes.
     plt.rcParams.update({"font.size": 9, "axes.spines.top": False, "axes.spines.right": False})
     fig, axes = plt.subplots(3, 4, figsize=(17, 10), sharex="col")
     for j, (sweep, scen, levels, title) in enumerate(panels):
+        levels = [lv for lv in levels if lv > 0]
         for name in ctrls:
             c = COLORS.get(name, "#555555")
             ls = "--" if "sat" in name else "-"
-            for i, key in enumerate(("survived", "dv_mps", "rms_dist_km")):
+            for i, key in enumerate(("survived", "dv_mps", "rms_late_km")):
                 ys = [agg(sweep, scen, name, lv, key) for lv in levels]
                 if key == "survived":
                     ys = [100 * y for y in ys]
                 axes[i, j].plot(levels, ys, "o" + ls, color=c, ms=3.5, lw=1.3, label=name)
         axes[0, j].set_title(title)
-        axes[2, j].set_xlabel("k" if sweep != "offset" else "km")
+        axes[0, j].set_ylim(-5, 105)
+        axes[2, j].set_xlabel("k" if sweep != "offset" else "start offset [km]")
         for i in range(3):
-            axes[i, j].set_xscale("symlog" if levels[0] == 0 else "log",
-                                  **({"linthresh": 0.5} if levels[0] == 0 else {}))
+            axes[i, j].set_xscale("log")
+            axes[i, j].set_xticks(levels)
+            axes[i, j].set_xticklabels([f"{lv:g}" for lv in levels])
+            axes[i, j].minorticks_off()
             if i > 0:
                 axes[i, j].set_yscale("log")
     axes[0, 0].set_ylabel("runs kept 1 year [%]")
-    axes[1, 0].set_ylabel("delta-v over one year [m/s]")
-    axes[2, 0].set_ylabel("RMS distance from L1 [km]")
+    axes[1, 0].set_ylabel("delta-v over one year [m/s]\n(runs kept)")
+    axes[2, 0].set_ylabel("RMS distance, days 183-365 [km]\n(runs kept)")
     axes[0, 0].legend(frameon=False)
     fig.tight_layout()
     fig.savefig(ROOT / "figures" / "robustness.png", dpi=150)
