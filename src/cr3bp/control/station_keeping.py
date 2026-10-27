@@ -39,14 +39,18 @@ class NoiseModel:
     vel_mps: float = 0.001        # velocity knowledge error per axis (1 mm/s)
     thrust_mag_frac: float = 0.02 # thrust magnitude error (2 %)
     thrust_angle_deg: float = 1.0 # thrust pointing error
+    #: Unmodelled forces (solar radiation pressure changes, the Moon, planets),
+    #: drawn per axis for every control interval and held over it.
+    disturbance_mps2: float = 1e-9
 
     @classmethod
     def none(cls):
-        return cls(0.0, 0.0, 0.0, 0.0)
+        return cls(0.0, 0.0, 0.0, 0.0, 0.0)
 
     def scaled(self, factor):
         return NoiseModel(self.pos_km * factor, self.vel_mps * factor,
-                          self.thrust_mag_frac * factor, self.thrust_angle_deg * factor)
+                          self.thrust_mag_frac * factor, self.thrust_angle_deg * factor,
+                          self.disturbance_mps2 * factor)
 
 
 def planar_rhs(s, mu, u):
@@ -171,9 +175,10 @@ class StationKeepingSim:
         Returns (observation, failed).
         """
         u = self._execute(u_cmd)
+        d = self.rng.normal(0.0, self.noise.disturbance_mps2 * MPS2, 2)
         x, y, vx, vy = (float(v) for v in self.state)
-        self.state = np.array(_rk4_planar(x, y, vx, vy, self.mu, float(u[0]), float(u[1]),
-                                          self.h, self.n_sub))
+        self.state = np.array(_rk4_planar(x, y, vx, vy, self.mu, float(u[0] + d[0]),
+                                          float(u[1] + d[1]), self.h, self.n_sub))
         self.t += self.dt
         self.dv += float(np.hypot(*u)) * self.dt     # fuel actually spent
         return self.observe(), self.failed

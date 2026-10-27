@@ -42,12 +42,12 @@ The Sun–Earth L1 point sits about 1.49 million km sunward of Earth. It is an e
 
 Sweeping the fuel weight ρ over nine orders of magnitude (5 seeds each) gives the baseline the RL agents must beat:
 
-- **Holding** (start at L1): 0.03–0.94 m/s per year of Δv, for a mean distance of 1.34–0.39 km. Below ~0.4 km, navigation errors set the floor and extra fuel buys almost nothing.
+- **Holding** (start at L1): 0.03–0.95 m/s per year of Δv, for a mean distance of 2.5–0.4 km. Below ~0.4 km, navigation errors set the floor and extra fuel buys almost nothing. Without control, unmodelled forces alone push the spacecraft out within 230–260 days.
 - **Acquisition** (start 1,000 km away): the cheapest gain (ρ = 3) needs 1.12 m/s. Lazier gains cost *more*, because the unstable mode keeps growing while the controller waits.
 
 ![LQR fuel/accuracy trade-off](figures/lqr_pareto.png)
 
-Error model (1σ, illustrative assumptions): position 1 km, velocity 1 mm/s, thrust magnitude 2 %, pointing 1°. Raw results: `experiments/lqr_pareto.csv`.
+Error model (1σ, illustrative assumptions): navigation errors of 1 km and 1 mm/s, thrust errors of 2 % in magnitude and 1° in pointing, and a random unmodelled acceleration of 10⁻⁹ m/s² per axis per day (solar radiation pressure changes, the Moon, planets). Raw results: `experiments/lqr_pareto.csv`.
 
 **Current simplifications.** The spacecraft holds the L1 point itself; real missions fly halo or Lissajous orbits around it (to keep the Sun out of the antenna beam). Motion is planar, and thrust is a low, continuous push updated daily rather than impulsive burns weeks apart. These are deliberate, so LQR and RL are compared on identical, controlled conditions.
 
@@ -74,7 +74,7 @@ git clone https://github.com/<your-username>/l1-station-keeping.git
 cd l1-station-keeping
 pip install -e ".[dev]"
 
-pytest                                  # 22 correctness tests
+pytest                                  # correctness tests
 python scripts/01_lagrange_points.py    # table + figures/lagrange_points.png
 python scripts/02_jacobi_validation.py  # figures/jacobi_validation.png
 python scripts/03_l1_escape.py          # figures/l1_escape.png

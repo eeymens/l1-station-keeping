@@ -46,6 +46,12 @@ def test_uncontrolled_spacecraft_is_lost():
     assert res["days_survived"] < 90
 
 
+def test_disturbances_push_a_coasting_spacecraft_off_l1():
+    # Exactly at L1 and at rest, only the unmodelled forces can move it
+    res = run_episode(StationKeepingSim(seed=0), None, offset_km=(0.0, 0.0))
+    assert not res["survived"]
+
+
 def test_lqr_recovers_from_1000_km_without_noise():
     res = run_episode(StationKeepingSim(noise=NoiseModel.none()), LQRController())
     assert res["survived"]
