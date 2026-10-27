@@ -56,6 +56,42 @@ def planar_rhs(s, mu, u):
     return np.array([vx, vy, 2.0 * vy + ox + u[0], -2.0 * vx + oy + u[1]])
 
 
+def _rk4_planar(x, y, vx, vy, mu, ux, uy, h, n):
+    """n RK4 steps of the planar CR3BP with constant control, on plain floats.
+
+    Same equations as `planar_rhs`, written without numpy so the inner loop
+    is fast enough for reinforcement learning (millions of steps).
+    """
+    m1 = 1.0 - mu
+    sq = math.sqrt
+
+    def acc(x, y, vx, vy):
+        dx1, dx2 = x + mu, x - m1
+        y2 = y * y
+        r1 = sq(dx1 * dx1 + y2)
+        r2 = sq(dx2 * dx2 + y2)
+        k1 = m1 / (r1 * r1 * r1)
+        k2 = mu / (r2 * r2 * r2)
+        ax = 2.0 * vy + x - k1 * dx1 - k2 * dx2 + ux
+        ay = -2.0 * vx + y - k1 * y - k2 * y + uy
+        return ax, ay
+
+    h2, h6 = h / 2.0, h / 6.0
+    for _ in range(n):
+        a1x, a1y = acc(x, y, vx, vy)
+        v2x, v2y = vx + h2 * a1x, vy + h2 * a1y
+        a2x, a2y = acc(x + h2 * vx, y + h2 * vy, v2x, v2y)
+        v3x, v3y = vx + h2 * a2x, vy + h2 * a2y
+        a3x, a3y = acc(x + h2 * v2x, y + h2 * v2y, v3x, v3y)
+        v4x, v4y = vx + h * a3x, vy + h * a3y
+        a4x, a4y = acc(x + h * v3x, y + h * v3y, v4x, v4y)
+        x += h6 * (vx + 2.0 * v2x + 2.0 * v3x + v4x)
+        y += h6 * (vy + 2.0 * v2y + 2.0 * v3y + v4y)
+        vx += h6 * (a1x + 2.0 * a2x + 2.0 * a3x + a4x)
+        vy += h6 * (a1y + 2.0 * a2y + 2.0 * a3y + a4y)
+    return x, y, vx, vy
+
+
 class StationKeepingSim:
     """Planar spacecraft near L1 with periodic thrust commands.
 
@@ -135,14 +171,9 @@ class StationKeepingSim:
         Returns (observation, failed).
         """
         u = self._execute(u_cmd)
-        s, h, mu = self.state, self.h, self.mu
-        for _ in range(self.n_sub):
-            k1 = planar_rhs(s, mu, u)
-            k2 = planar_rhs(s + h / 2 * k1, mu, u)
-            k3 = planar_rhs(s + h / 2 * k2, mu, u)
-            k4 = planar_rhs(s + h * k3, mu, u)
-            s = s + h / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
-        self.state = s
+        x, y, vx, vy = (float(v) for v in self.state)
+        self.state = np.array(_rk4_planar(x, y, vx, vy, self.mu, float(u[0]), float(u[1]),
+                                          self.h, self.n_sub))
         self.t += self.dt
         self.dv += float(np.hypot(*u)) * self.dt     # fuel actually spent
         return self.observe(), self.failed
