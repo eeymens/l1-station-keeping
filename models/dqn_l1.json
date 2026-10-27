@@ -1,0 +1,5 @@
+{
+  "algo": "dqn",
+  "env": {"action_type": "discrete", "w_pos": 0.1},
+  "train": {"steps": 1000000, "seed": 0, "eval_every": 25000, "lr": 0.0005, "target_update": 2000, "w_pos": 0.1, "name": "dqn_l1"}
+}

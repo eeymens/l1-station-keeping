@@ -11,8 +11,11 @@ Observation (8 values, from the noisy navigation estimate)
 
 Actions
     discrete:   0 = coast; then 8 directions x 3 thrust levels (25 actions)
-    continuous: a 2-vector in [-1, 1]^2, scaled to the maximum thrust
-                (norm clipped to 1)
+    continuous: a 2-vector a in [-1, 1]^2 (norm clipped to 1), mapped to
+                u = u_max * |a|^p * a/|a|. With p = 1 the map is linear; with
+                p = 3 small actions give very small thrusts (a = 0.13 ->
+                0.002 u_max), so the fine thrust needed for holding is easy
+                to reach while the full u_max stays available.
 
 Reward per day
     +1 for staying in the region
@@ -45,10 +48,11 @@ class L1StationKeepingEnv(gym.Env):
 
     def __init__(self, action_type="discrete", episode_days=365, max_offset_km=1000.0,
                  max_vel_mps=0.05, noise=None, w_pos=0.1, w_fuel=10.0, fail_penalty=100.0,
-                 u_max_mps2=THRUST_LEVELS_MPS2[-1], dt_days=1.0, seed=None):
+                 u_max_mps2=THRUST_LEVELS_MPS2[-1], action_power=1.0, dt_days=1.0, seed=None):
         super().__init__()
         self.sim = StationKeepingSim(dt_days=dt_days, noise=noise, seed=seed)
         self.action_type = action_type
+        self.action_power = float(action_power)
         self.episode_steps = int(round(episode_days / dt_days))
         self.max_offset_km = max_offset_km
         self.max_vel_mps = max_vel_mps
@@ -79,9 +83,11 @@ class L1StationKeepingEnv(gym.Env):
             return self._action_table[int(action)]
         a = np.asarray(action, dtype=float)
         n = np.hypot(*a)
+        if n == 0.0:
+            return np.zeros(2)
         if n > 1.0:
-            a = a / n
-        return a * self.u_max
+            a, n = a / n, 1.0
+        return a * n ** (self.action_power - 1.0) * self.u_max
 
     @staticmethod
     def features(rel):

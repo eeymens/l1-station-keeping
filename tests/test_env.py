@@ -84,3 +84,44 @@ def test_policy_controller_runs_in_evaluation_loop():
     coast = PolicyController(env, lambda features: 0)
     res = run_episode(StationKeepingSim(noise=NoiseModel.none()), coast)
     assert not res["survived"] and res["dv_total_mps"] == 0.0
+
+
+@pytest.mark.parametrize("power", [1.0, 3.0])
+def test_continuous_action_power_map(power):
+    env = L1StationKeepingEnv(action_type="continuous", action_power=power)
+    for a in ([0.1, 0.0], [0.0, -0.5], [0.3, 0.4]):
+        u = env.action_to_accel(np.array(a))
+        n = math.hypot(*a)
+        assert math.hypot(*u) == pytest.approx(env.u_max * n**power)
+        assert u @ np.array(a) == pytest.approx(math.hypot(*u) * n)   # same direction
+    assert np.all(env.action_to_accel(np.zeros(2)) == 0)
+    # p = 3 reaches the ~2e-9 m/s^2 holding thrust with a moderate action
+    if power == 3.0:
+        a = (2e-9 / 1e-6) ** (1 / 3)
+        assert math.hypot(*env.action_to_accel(np.array([a, 0.0]))) / MPS2 == pytest.approx(2e-9)
+
+
+def test_evaluation_reports_tracking_error():
+    from cr3bp.control import LQRController
+    from cr3bp.evaluation import evaluate, summarize
+    rows = evaluate(LQRController(rho=3.0), seeds=range(1), days=30)
+    for r in rows:
+        assert r["max_dist_km"] >= r["rms_dist_km"] >= r["mean_dist_km"] > 0
+    s = summarize(rows)
+    assert set(s) == {"holding", "acquisition"} and "rms_dist_km" in s["holding"]
+
+
+def test_saved_policy_round_trip(tmp_path):
+    pytest.importorskip("stable_baselines3")
+    from stable_baselines3 import PPO
+    from cr3bp.training import load_policy, save_config
+
+    kw = {"action_type": "continuous", "action_power": 3.0}
+    model = PPO("MlpPolicy", L1StationKeepingEnv(**kw), n_steps=64, batch_size=32, seed=0)
+    model.save(tmp_path / "ppo_test")
+    save_config(tmp_path / "ppo_test", "ppo", kw, {})
+    env, ctrl = load_policy(tmp_path, "ppo_test")
+    assert env.action_type == "continuous" and env.action_power == 3.0
+    obs = StationKeepingSim(noise=NoiseModel.none()).reset((100.0, 0.0))
+    u = ctrl(obs)
+    assert u.shape == (2,) and math.hypot(*u) <= env.u_max * (1 + 1e-12)
