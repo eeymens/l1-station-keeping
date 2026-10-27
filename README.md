@@ -15,7 +15,7 @@ The Sun–Earth L1 point sits about 1.49 million km sunward of Earth. It is an e
 | 1 | CR3BP simulator, RK4 + DOP853, Jacobi-constant validation | Done |
 | 2 | Lagrange points, linear stability, uncontrolled escape from L1 | Done |
 | 3 | LQR baseline controller, fuel/accuracy trade-off | Done |
-| 4 | Gymnasium environment, DQN agent | Planned |
+| 4 | Gymnasium environment, DQN agent, comparison with LQR | Done |
 | 5 | PPO agent, comparison experiments (Δv, tracking error, robustness) | Planned |
 | 6 | Paper | Planned |
 
@@ -49,6 +49,19 @@ Sweeping the fuel weight ρ over nine orders of magnitude (5 seeds each) gives t
 
 Error model (1σ, illustrative assumptions): navigation errors of 1 km and 1 mm/s, thrust errors of 2 % in magnitude and 1° in pointing, and a random unmodelled acceleration of 10⁻⁹ m/s² per axis per day (solar radiation pressure changes, the Moon, planets). Raw results: `experiments/lqr_pareto.csv`.
 
+**DQN vs LQR (phase 4).** A DQN agent picks one of 25 actions each day: coast, or thrust in one of 8 directions at 10⁻⁸, 10⁻⁷ or 10⁻⁶ m/s². Two training runs of 1M steps each; the best checkpoint of each run is tested on 20 seeds never used in training or model selection.
+
+| Controller | Holding: Δv / year | Holding: mean distance | Recovery from 1,000 km: Δv | Recovery: mean distance | Runs kept 1 year |
+| --- | --- | --- | --- | --- | --- |
+| No control | 0 | lost after ~250 days | 0 | lost after 61 days | 0 % |
+| LQR (ρ = 3) | 0.062 m/s | 0.5 km | 1.12 m/s | 76 km | 100 % |
+| DQN run 1 | 0.42 m/s | 10.9 km | 2.11 m/s | 118 km | 100 % |
+| DQN run 2 (lower learning rate, stronger distance penalty) | 0.72 m/s | 1.4 km | 2.17 m/s | 68 km | 100 % |
+
+Both agents learned to keep the spacecraft in every test episode, but LQR uses 2–12× less fuel. The thrust logs show why: while holding, LQR's thrust is about 2 × 10⁻⁹ m/s², five times below the smallest discrete DQN action. Run 1 fires that smallest level on 351 of 365 days; run 2 coasts on 214 days and over-corrects with 10⁻⁷ m/s² on 97. The gap comes from the coarse action set rather than from learning, which is what phase 5 tests with continuous-thrust PPO. Run 1 also collapsed after 700k steps (a known DQN instability); run 2's lower learning rate and slower target updates kept training stable.
+
+![LQR vs DQN](figures/lqr_vs_dqn_l1_run2.png)
+
 **Current simplifications.** The spacecraft holds the L1 point itself; real missions fly halo or Lissajous orbits around it (to keep the Sun out of the antenna beam). Motion is planar, and thrust is a low, continuous push updated daily rather than impulsive burns weeks apart. These are deliberate, so LQR and RL are compared on identical, controlled conditions.
 
 ## The model
@@ -73,6 +86,7 @@ Velocity Verlet is not used because the Coriolis term depends on velocity, which
 git clone https://github.com/<your-username>/l1-station-keeping.git
 cd l1-station-keeping
 pip install -e ".[dev]"
+pip install -e ".[rl]"                  # phase 4+: gymnasium, stable-baselines3
 
 pytest                                  # correctness tests
 python scripts/01_lagrange_points.py    # table + figures/lagrange_points.png
@@ -80,6 +94,9 @@ python scripts/02_jacobi_validation.py  # figures/jacobi_validation.png
 python scripts/03_l1_escape.py          # figures/l1_escape.png
 python scripts/04_lqr_station_keeping.py # figures/lqr_station_keeping.png
 python scripts/05_lqr_pareto.py         # figures/lqr_pareto.png (~30 s)
+python scripts/06_train_dqn.py --steps 1000000 --lr 1e-4 --target-update 10000 \
+    --w-pos 0.3 --name dqn_l1_run2      # ~22 min on one CPU core
+python scripts/07_compare_controllers.py --model dqn_l1_run2
 ```
 
 ```python
@@ -105,6 +122,9 @@ src/cr3bp/
   control/
     station_keeping.py   simulator: daily thrust, navigation/thrust errors, delta-v log
     lqr.py               ZOH discretisation, discrete Riccati, LQR controller
+  envs/l1_env.py         gymnasium environment (discrete or continuous thrust)
+  evaluation.py          common test protocol: same scenarios and seeds for every controller
+models/            trained agents (best checkpoint of each run)
 experiments/       raw CSV results
 scripts/           one script per figure
 tests/             pytest suite

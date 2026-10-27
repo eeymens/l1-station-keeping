@@ -7,7 +7,7 @@ the checkpoint that happened to score best.
 For each scenario, LQR is shown as a curve over its fuel weight rho; DQN is
 a single point. A controller below/left of the LQR curve beats it.
 
-Writes experiments/comparison.csv and figures/lqr_vs_dqn.png.
+Writes experiments/comparison_<model>.csv and figures/lqr_vs_<model>.png.
 
 Run from the repository root:  python scripts/07_compare_controllers.py
 """
@@ -45,7 +45,7 @@ for name, ctrl in [("coast", None), ("DQN", dqn), (f"LQR rho={LQR_REF_RHO:g}",
 lqr_curve = {rho: summarize(evaluate(LQRController(rho=rho), seeds=TEST_SEEDS)) for rho in RHOS}
 
 (ROOT / "experiments").mkdir(exist_ok=True)
-with open(ROOT / "experiments" / "comparison.csv", "w", newline="") as fh:
+with open(ROOT / "experiments" / f"comparison_{args.model}.csv", "w", newline="") as fh:
     w = csv.DictWriter(fh, fieldnames=rows[0].keys())
     w.writeheader()
     w.writerows(rows)
@@ -90,5 +90,5 @@ ax.set_title(f"One recovery run (seed {TEST_SEEDS.start})")
 ax.legend(frameon=False, fontsize=9)
 
 fig.tight_layout()
-fig.savefig(ROOT / "figures" / "lqr_vs_dqn.png", dpi=160)
-print("\nSaved figures/lqr_vs_dqn.png and experiments/comparison.csv")
+fig.savefig(ROOT / "figures" / f"lqr_vs_{args.model}.png", dpi=160)
+print(f"\nSaved figures/lqr_vs_{args.model}.png and experiments/comparison_{args.model}.csv")
