@@ -6,7 +6,9 @@ The best policy so far is saved to models/dqn_l1.zip and the learning curve
 to experiments/dqn_training.csv + figures/dqn_learning_curve.png.
 
 Run from the repository root:
-    python scripts/06_train_dqn.py --steps 500000
+    python scripts/06_train_dqn.py --steps 1000000                      # run 1
+    python scripts/06_train_dqn.py --steps 1000000 --lr 1e-4 \
+        --target-update 10000 --w-pos 0.3 --name dqn_l1_run2             # run 2
 """
 
 import argparse
@@ -70,17 +72,21 @@ def main():
     p.add_argument("--steps", type=int, default=500_000)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--eval-every", type=int, default=25_000)
+    p.add_argument("--lr", type=float, default=5e-4)
+    p.add_argument("--target-update", type=int, default=2_000)
+    p.add_argument("--w-pos", type=float, default=0.1, help="distance weight in the reward")
+    p.add_argument("--name", default="dqn_l1", help="output name for model, CSV and figure")
     args = p.parse_args()
 
-    env = Monitor(L1StationKeepingEnv(seed=args.seed))
+    env = Monitor(L1StationKeepingEnv(seed=args.seed, w_pos=args.w_pos))
     (ROOT / "models").mkdir(exist_ok=True)
-    model_path = ROOT / "models" / "dqn_l1"
+    model_path = ROOT / "models" / args.name
 
     model = DQN(
         "MlpPolicy", env, seed=args.seed, verbose=0,
-        learning_rate=5e-4, buffer_size=200_000, learning_starts=10_000,
+        learning_rate=args.lr, buffer_size=200_000, learning_starts=10_000,
         batch_size=256, gamma=0.99, train_freq=4, gradient_steps=1,
-        target_update_interval=2_000, exploration_fraction=0.3,
+        target_update_interval=args.target_update, exploration_fraction=0.3,
         exploration_final_eps=0.02, policy_kwargs={"net_arch": [128, 128]},
     )
     cb = EvalCallback(L1StationKeepingEnv(), args.eval_every, model_path)
@@ -89,7 +95,7 @@ def main():
     print(f"Training took {(time.time() - t0) / 60:.1f} min; best score {cb.best:.2f}")
 
     (ROOT / "experiments").mkdir(exist_ok=True)
-    with open(ROOT / "experiments" / "dqn_training.csv", "w", newline="") as fh:
+    with open(ROOT / "experiments" / f"{args.name}_training.csv", "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=cb.log[0].keys())
         w.writeheader()
         w.writerows(cb.log)
@@ -111,8 +117,9 @@ def main():
         ax.set_title(title)
         ax.legend(frameon=False, fontsize=9)
     fig.tight_layout()
-    fig.savefig(ROOT / "figures" / "dqn_learning_curve.png", dpi=160)
-    print("Saved models/dqn_l1.zip, experiments/dqn_training.csv, figures/dqn_learning_curve.png")
+    fig.savefig(ROOT / "figures" / f"{args.name}_learning_curve.png", dpi=160)
+    print(f"Saved models/{args.name}.zip, experiments/{args.name}_training.csv, "
+          f"figures/{args.name}_learning_curve.png")
 
 
 if __name__ == "__main__":

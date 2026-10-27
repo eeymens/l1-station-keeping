@@ -12,6 +12,7 @@ Writes experiments/comparison.csv and figures/lqr_vs_dqn.png.
 Run from the repository root:  python scripts/07_compare_controllers.py
 """
 
+import argparse
 import csv
 from pathlib import Path
 
@@ -28,8 +29,12 @@ TEST_SEEDS = range(100, 120)
 RHOS = np.logspace(-3, 4, 15)
 LQR_REF_RHO = 3.0                       # cheapest acquisition in the phase-3 sweep
 
+ap = argparse.ArgumentParser()
+ap.add_argument("--model", default="dqn_l1", help="name of the model in models/")
+args = ap.parse_args()
+
 env = L1StationKeepingEnv()
-model = DQN.load(ROOT / "models" / "dqn_l1.zip", device="cpu")
+model = DQN.load(ROOT / "models" / f"{args.model}.zip", device="cpu")
 dqn = PolicyController(env, lambda f: model.predict(f, deterministic=True)[0])
 
 rows = []
