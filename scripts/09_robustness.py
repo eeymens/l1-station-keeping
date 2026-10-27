@@ -13,10 +13,14 @@ The RL agents can thrust at most 1e-6 m/s^2. Plain LQR has no limit, so the
 sweeps also fly LQR saturated at the same 1e-6 m/s^2, for a fair comparison
 at large offsets.
 
-Writes experiments/robustness.csv and figures/robustness.png.
+Controllers are keyed by model name, so several models of the same algorithm
+(e.g. PPO trained with different seeds) can be compared in one run.
+
+Writes experiments/<out>.csv and figures/<out>.png (default out: robustness).
 
 Run from the repository root:
     python scripts/09_robustness.py --model dqn_l1_run2 ppo_l1
+    python scripts/09_robustness.py --model ppo_l1 ppo_l1_s1 ppo_l1_s2 --out robustness_seeds
 """
 
 import argparse
@@ -38,7 +42,9 @@ NOISE_SCALES = (0.0, 0.5, 1.0, 2.0, 4.0, 8.0)
 DIST_SCALES = (1.0, 3.0, 10.0, 30.0, 100.0)
 OFFSETS_KM = (250.0, 500.0, 1000.0, 2000.0, 3000.0, 5000.0)
 ANGLES_DEG = (0.0, 90.0, 180.0, 270.0)
-COLORS = {"LQR": "#2471a3", "LQR (sat.)": "#85c1e9", "DQN": "#c0392b", "PPO": "#d68910"}
+COLORS = {"LQR": "#2471a3", "LQR (sat.)": "#85c1e9"}
+ALGO_COLORS = {"dqn": ["#c0392b", "#e6786c", "#7b241c"],
+               "ppo": ["#d68910", "#7d3c98", "#1e8449", "#a04000"]}
 
 
 def episode_row(ctrl, seed, noise, offset):
@@ -56,13 +62,22 @@ def main():
     ap.add_argument("--model", nargs="+", default=["dqn_l1_run2", "ppo_l1"])
     ap.add_argument("--seeds", type=int, default=len(TEST_SEEDS),
                     help="number of test seeds (from 100)")
+    ap.add_argument("--out", default="robustness",
+                    help="output name for experiments/<out>.csv and figures/<out>.png")
     args = ap.parse_args()
     seeds = range(TEST_SEEDS.start, TEST_SEEDS.start + args.seeds)
 
     ctrls = {"LQR": LQRController(rho=LQR_RHO),
              "LQR (sat.)": LQRController(rho=LQR_RHO, u_max_mps2=U_MAX)}
-    for m in args.model:
-        ctrls[m.split("_")[0].upper()] = load_policy(ROOT / "models", m)[1]
+    used = {}
+    for m in args.model:                     # key by model name: no collisions
+        if m in ctrls:
+            raise SystemExit(f"model {m} given twice")
+        ctrls[m] = load_policy(ROOT / "models", m)[1]
+        algo = m.split("_")[0].lower()
+        palette = ALGO_COLORS.get(algo, ["#555555"])
+        COLORS[m] = palette[used.get(algo, 0) % len(palette)]
+        used[algo] = used.get(algo, 0) + 1
 
     rows, t0 = [], time.time()
 
@@ -89,7 +104,7 @@ def main():
         run("offset", r_km, "acquisition", nominal, offs)
         print(f"offset {r_km:g} km done ({time.time() - t0:.0f} s)", flush=True)
 
-    with open(ROOT / "experiments" / "robustness.csv", "w", newline="") as fh:
+    with open(ROOT / "experiments" / f"{args.out}.csv", "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=rows[0].keys())
         w.writeheader()
         w.writerows(rows)
@@ -108,14 +123,14 @@ def main():
               ("offset", "acquisition", OFFSETS_KM, "start offset [km]")]
     for sweep, scen, levels, title in panels:
         print(f"\n{title}   [kept, delta-v of kept runs, RMS distance in days 183-365]")
-        print(f"{'controller':<12}" + "".join(f"{lv:>22g}" for lv in levels))
+        print(f"{'controller':<18}" + "".join(f"{lv:>22g}" for lv in levels))
         for name in ctrls:
             cells = []
             for lv in levels:
                 s = agg(sweep, scen, name, lv, "survived")
                 cells.append(f"{s:4.0%} {agg(sweep, scen, name, lv, 'dv_mps'):6.2f}m/s "
                              f"{agg(sweep, scen, name, lv, 'rms_late_km'):6.1f}km")
-            print(f"{name:<12}" + "".join(f"{c:>22}" for c in cells))
+            print(f"{name:<18}" + "".join(f"{c:>22}" for c in cells))
 
     # ------------------------------------------------------------ figure
     # k = 0 (no errors at all) is in the CSV and the table but not in the
@@ -147,8 +162,8 @@ def main():
     axes[2, 0].set_ylabel("RMS distance, days 183-365 [km]\n(runs kept)")
     axes[0, 0].legend(frameon=False)
     fig.tight_layout()
-    fig.savefig(ROOT / "figures" / "robustness.png", dpi=150)
-    print(f"\nSaved figures/robustness.png and experiments/robustness.csv "
+    fig.savefig(ROOT / "figures" / f"{args.out}.png", dpi=150)
+    print(f"\nSaved figures/{args.out}.png and experiments/{args.out}.csv "
           f"({time.time() - t0:.0f} s)")
 
 

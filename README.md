@@ -4,7 +4,7 @@ Can a reinforcement learning agent keep a spacecraft at the unstable Sun–Earth
 
 The Sun–Earth L1 point sits about 1.49 million km sunward of Earth. It is an equilibrium of the circular restricted three-body problem (CR3BP), but an unstable one: a spacecraft left there with a 150 m error drifts away by a factor of *e* every 23 days and is more than a million kilometres off within a year. Missions such as SOHO (at L1) and JWST (at L2) fire their thrusters regularly to stay in place. This project builds the dynamics from scratch, verifies them, and compares an LQR controller with DQN and PPO agents on the station-keeping task.
 
-**Short answer: no.** PPO with continuous thrust gets within 1.4–1.6× of LQR's fuel at the same accuracy (DQN: 2–12×), and it handles the thrust limit better than a saturated LQR, but it never beats LQR on fuel.
+**Short answer: no.** Across three training seeds, PPO with continuous thrust needs 1.3–2.7× LQR's fuel at the same accuracy while holding (DQN: 2–12×) and never beats LQR on fuel. One of the three PPO seeds also handled the thrust limit better than a saturated LQR, but the other two did not.
 
 ![Uncontrolled drift away from L1](figures/l1_escape.png)
 
@@ -18,7 +18,7 @@ The Sun–Earth L1 point sits about 1.49 million km sunward of Earth. It is an e
 | 2 | Lagrange points, linear stability, uncontrolled escape from L1 | Done |
 | 3 | LQR baseline controller, fuel/accuracy trade-off | Done |
 | 4 | Gymnasium environment, DQN agent, comparison with LQR | Done |
-| 5 | PPO agent, comparison experiments (Δv, tracking error, robustness) | Done |
+| 5 | PPO agent, comparison experiments (Δv, tracking error, robustness), 3 training seeds | Done |
 | 6 | Paper | Planned |
 
 ## Results so far
@@ -64,40 +64,59 @@ Both agents learned to keep the spacecraft in every test episode, but LQR uses 2
 
 ![LQR vs DQN](figures/lqr_vs_dqn_l1_run2.png)
 
-**PPO vs LQR (phase 5).** PPO outputs a continuous 2-D thrust vector, capped at the same 10⁻⁶ m/s² as DQN's largest action. The action *a* (|*a*| ≤ 1) is mapped to thrust *u* = *u*ₘₐₓ |*a*|³ *a*/|*a*|: the cubic map makes the ~2 × 10⁻⁹ m/s² holding thrust a moderate action (|*a*| ≈ 0.13) instead of 0.002 of full scale. A second run with the plain linear map (|*a*|¹) isolates the effect of this choice. Both runs: 3M steps, 8 parallel environments, same reward and model selection as DQN run 2 (~11 min each). Test seeds 100–119:
+**PPO vs LQR (phase 5).** PPO outputs a continuous 2-D thrust vector, capped at the same 10⁻⁶ m/s² as DQN's largest action. The action *a* (|*a*| ≤ 1) is mapped to thrust *u* = *u*ₘₐₓ |*a*|³ *a*/|*a*|: the cubic map makes the ~2 × 10⁻⁹ m/s² holding thrust a moderate action (|*a*| ≈ 0.13) instead of 0.002 of full scale. A second configuration with the plain linear map (|*a*|¹) isolates the effect of this choice. Every run: 3M steps, 8 parallel environments, same reward and model selection as DQN run 2 (~11 min each). Each configuration was trained with three training seeds (0, 1, 2) and otherwise identical hyperparameters, to check that the results are not one lucky run. Test seeds 100–119; the "3 seeds" rows are mean ± standard deviation (n = 3, ddof = 1) across training seeds:
 
 | Controller | Holding: Δv / year | Holding: mean / RMS distance | Recovery: Δv | Recovery: mean distance | Runs kept 1 year |
 | --- | --- | --- | --- | --- | --- |
 | LQR (ρ = 3) | 0.062 m/s | 0.5 / 0.6 km | 1.12 m/s | 76 km | 100 % |
 | DQN run 2 | 0.72 m/s | 1.4 / 1.6 km | 2.17 m/s | 68 km | 100 % |
-| PPO, linear thrust map | 0.41 m/s | 0.4 / 0.5 km | 1.86 m/s | 56 km | 100 % |
-| **PPO, cubic thrust map** | **0.12 m/s** | **0.5 / 0.5 km** | **1.60 m/s** | **65 km** | 100 % |
+| PPO, linear thrust map (training seed 0) | 0.41 m/s | 0.4 / 0.5 km | 1.86 m/s | 56 km | 100 % |
+| PPO, cubic thrust map (training seed 0) | 0.12 m/s | 0.5 / 0.5 km | 1.60 m/s | 65 km | 100 % |
+| PPO, linear thrust map (3 seeds) | 0.39 ± 0.04 m/s | 0.45 ± 0.04 / 0.51 ± 0.04 km | 1.72 ± 0.12 m/s | 72 ± 14 km | 100 % |
+| **PPO, cubic thrust map (3 seeds)** | **0.110 ± 0.007 m/s** | **0.57 ± 0.17 / 0.64 ± 0.18 km** | **1.46 ± 0.18 m/s** | **84 ± 30 km** | 100 % |
 
-PPO tracks a little more tightly than LQR ρ = 3, so the fair comparison is against LQR tuned to the *same* accuracy (interpolating the ρ sweep): there LQR needs 0.074 m/s while holding and 1.11 m/s for recovery, so **PPO uses 1.6× and 1.4× more fuel**. Both PPO points sit above the LQR curve: LQR is still Pareto-optimal.
+PPO does not track at exactly the accuracy of LQR ρ = 3, so the fair comparison is against LQR tuned to the *same* accuracy. `scripts/10_seed_study.py` sweeps LQR over 57 values of ρ (10⁻³–10⁴) on the test seeds, keeps the branch from the tightest gain up to the Δv minimum (beyond it, lazier gains cost more fuel again), and interpolates log-log at each model's mean distance:
+
+| PPO model | Holding: × LQR fuel at same accuracy | Recovery: × LQR fuel at same accuracy | Best checkpoint |
+| --- | --- | --- | --- |
+| cubic, seed 0 | 1.54 | 1.44 | 250k steps |
+| cubic, seed 1 | 1.31 | 1.13 | 250k steps |
+| cubic, seed 2 | 2.74 | dominated (≥ 1.37) | 200k steps |
+| linear, seed 0 | 4.48 | 1.61 | 2.95M steps |
+| linear, seed 1 | 5.92 | dominated (≥ 1.48) | 1.2M steps |
+| linear, seed 2 | 2.90 | dominated (≥ 1.50) | 2.9M steps |
+| **cubic, mean ± std** | **1.87 ± 0.77** | — | |
+| linear, mean ± std | 4.43 ± 1.51 | — | |
+
+"Dominated" means the model tracks *less* tightly than the cheapest LQR (ρ ≈ 1.8: 1.11 m/s at 69 km), which is therefore both cheaper and more accurate; the bracket is the ratio to that cheapest LQR, a lower bound. The single-seed figure quoted before ("1.6× / 1.4×", training seed 0, from a coarser interpolation) does not carry over as one number: across three training seeds the cubic agent needs 1.3–2.7× LQR's fuel while holding and 1.1–1.4× (or is dominated) for recovery. What does hold in all three seeds is the conclusion: **every PPO model sits above the LQR curve, so LQR is still Pareto-optimal.**
+
+![PPO training seeds vs the LQR trade-off](figures/seed_study.png)
 
 ![LQR vs DQN vs PPO](figures/lqr_vs_phase5.png)
 
-The thrust logs (holding, seed 100) show what changed since phase 4. PPO's median daily thrust is 1.73 × 10⁻⁹ m/s², almost exactly LQR's 1.79 × 10⁻⁹, so the agent did learn the right thrust scale. The extra fuel comes from the tail: PPO thrusts above 10⁻⁸ m/s² on 27 days, LQR on none. With the linear map the median is 1.0 × 10⁻⁸ m/s² (185 days above 10⁻⁸): the network cannot output 0.002 of full scale precisely enough, and fuel is 3.5× higher. **Most of the DQN–LQR gap was the action representation, not learning.** The best PPO checkpoint came after only 250k steps; longer training traded fuel for slightly tighter tracking and never raised the selection score again (`figures/ppo_l1_learning_curve.png`).
+The thrust logs (holding, seed 100) show what changed since phase 4. PPO's median daily thrust is 1.73 × 10⁻⁹ m/s², almost exactly LQR's 1.79 × 10⁻⁹, so the agent did learn the right thrust scale. The extra fuel comes from the tail: PPO thrusts above 10⁻⁸ m/s² on 27 days, LQR on none. With the linear map the median is 1.0 × 10⁻⁸ m/s² (185 days above 10⁻⁸): the network cannot output 0.002 of full scale precisely enough. Across the three training seeds the linear map needs 3.1–4.1× the cubic map's holding fuel (0.39 ± 0.04 vs 0.110 ± 0.007 m/s, while tracking slightly tighter: 0.45 vs 0.57 km) and 1.1–1.3× its recovery fuel, with no overlap between the two configurations in either scenario. **In all 3 training seeds, most of the DQN–LQR gap was the action representation, not learning.** With the cubic map the best checkpoint came early in all 3 training seeds (200k–250k of 3M steps); longer training traded fuel for slightly tighter tracking and never raised the selection score again (`figures/ppo_l1_learning_curve.png`). The linear map is different: its best checkpoints came at 1.2M–2.95M steps.
 
 **Robustness (phase 5).** All controllers were trained or tuned with the nominal error model and start offsets ≤ 1,000 km. `scripts/09_robustness.py` pushes them past that on the test seeds. Because the agents can thrust at most 10⁻⁶ m/s² and plain LQR has no limit, LQR is also flown saturated at 10⁻⁶ m/s² ("sat.").
 
-| Sweep (Δv / RMS distance in days 183–365) | LQR | PPO | DQN |
-| --- | --- | --- | --- |
-| All errors ×0 (holding) | 0.00 m/s / 0.0 km | 0.00 m/s / 0.7 km | 0.36 m/s / 2.7 km |
-| All errors ×1 (holding) | 0.06 m/s / 0.6 km | 0.12 m/s / 0.5 km | 0.72 m/s / 1.6 km |
-| All errors ×8 (holding) | 0.50 m/s / 4.9 km | 2.81 m/s / 4.2 km | 5.49 m/s / 9.6 km |
-| Unmodelled force ×100 (holding) | 1.13 m/s / 33 km | 2.18 m/s / 6.1 km | 4.10 m/s / 9.6 km |
-| Start 2,000 km away: kept | 100 % (sat.: 100 %) | 100 % | 65 % |
-| Start 3,000 km away: kept | 100 % (sat.: 50 %) | 100 % | 50 % |
-| Start 5,000 km away: kept | 100 % (sat.: 50 %) | 50 % | 25 % |
+The PPO column covers the cubic agent's three training seeds (`scripts/09_robustness.py --model ppo_l1 ppo_l1_s1 ppo_l1_s2 --out robustness_seeds`): a range is min–max over the seeds, and kept rates are listed as seed 0 / 1 / 2.
 
-- **Noise.** No controller lost a single run at up to 8× the nominal errors. PPO's fuel overhead grows with noise, from 2× LQR at nominal to 5.6× at ×8: it reacts to navigation noise instead of averaging it out, while LQR's gain is linear in the error by construction.
-- **Unmodelled forces.** With a 100× stronger unmodelled force, LQR ρ = 3 drifts to 33 km RMS because its gain was tuned for nominal conditions; PPO holds 6 km with twice the fuel. The two are no longer at the same point of the trade-off, so neither "wins" here.
-- **Large offsets and the thrust limit.** Apart from DQN at 5,000 km, every lost run started on the Sun–Earth line (0° or 180°), the direction of the unstable mode. A rough estimate of the mode's pull, λ²r, is 0.76 × 10⁻⁶ m/s² at 3,000 km and 1.27 × 10⁻⁶ m/s² at 5,000 km: at 5,000 km it exceeds the 10⁻⁶ m/s² limit, which is why all bounded controllers lose exactly those runs. At 3,000 km recovery is possible but only just: saturated LQR, whose gain ignores the limit, loses all 10 runs on the Sun–Earth line, while PPO keeps them, at a cost of ~13 m/s and still 60–215 km off after a year. Unlimited LQR keeps everything but needs up to 4.9 × 10⁻⁶ m/s².
+| Sweep (Δv / RMS distance in days 183–365) | LQR | PPO cubic, 3 training seeds | DQN |
+| --- | --- | --- | --- |
+| All errors ×0 (holding) | 0.00 m/s / 0.0 km | 0.00–0.01 m/s / 0.7–1.5 km | 0.36 m/s / 2.7 km |
+| All errors ×1 (holding) | 0.06 m/s / 0.6 km | 0.10–0.12 m/s / 0.5–0.8 km | 0.72 m/s / 1.6 km |
+| All errors ×8 (holding) | 0.50 m/s / 4.9 km | 2.02–2.81 m/s / 4.2–4.3 km | 5.49 m/s / 9.6 km |
+| Unmodelled force ×100 (holding) | 1.13 m/s / 33 km | 1.87–2.18 m/s / 6.1–9.6 km | 4.10 m/s / 9.6 km |
+| Start 2,000 km away: kept | 100 % (sat.: 100 %) | 100 % / 100 % / 100 % | 65 % |
+| Start 3,000 km away: kept | 100 % (sat.: 50 %) | 100 % / 50 % / 50 % | 50 % |
+| Start 5,000 km away: kept | 100 % (sat.: 50 %) | 50 % / 50 % / 50 % | 25 % |
+
+- **Noise.** No controller lost a single run at up to 8× the nominal errors (all 3 PPO training seeds). PPO's fuel overhead grows with noise, from 1.6–1.9× LQR at nominal to 4.0–5.6× at ×8: it reacts to navigation noise instead of averaging it out, while LQR's gain is linear in the error by construction.
+- **Unmodelled forces.** With a 100× stronger unmodelled force, LQR ρ = 3 drifts to 33 km RMS because its gain was tuned for nominal conditions; PPO holds 6–10 km with 1.7–1.9× the fuel. The two are no longer at the same point of the trade-off, so neither "wins" here.
+- **Large offsets and the thrust limit.** Apart from DQN at 5,000 km, every lost run started on the Sun–Earth line (0° or 180°), the direction of the unstable mode. A rough estimate of the mode's pull, λ²r, is 0.76 × 10⁻⁶ m/s² at 3,000 km and 1.27 × 10⁻⁶ m/s² at 5,000 km: at 5,000 km it exceeds the 10⁻⁶ m/s² limit, which is why all bounded controllers lose exactly those runs. At 3,000 km recovery is possible but only just: saturated LQR, whose gain ignores the limit, loses all 10 runs on the Sun–Earth line. PPO training seed 0 keeps them, at a cost of ~13 m/s and still 60–215 km off after a year, **but training seeds 1 and 2 lose exactly the same 10 runs as saturated LQR.** So the earlier claim that PPO handles the thrust limit better than saturated LQR does not hold across training seeds; it was a property of one run. Unlimited LQR keeps everything but needs up to 4.9 × 10⁻⁶ m/s².
 
 ![Robustness sweeps](figures/robustness.png)
 
-Raw results: `experiments/comparison_phase5.csv`, `experiments/robustness.csv`.
+Raw results: `experiments/comparison_phase5.csv`, `experiments/robustness.csv` (training seed 0 only), `experiments/seed_study.csv` (+ `seed_study_lqr.csv`, the 57-point LQR sweep), `experiments/robustness_seeds.csv`.
 
 **Current simplifications.** The spacecraft holds the L1 point itself; real missions fly halo or Lissajous orbits around it (to keep the Sun out of the antenna beam). Motion is planar, and thrust is a low, continuous push updated daily rather than impulsive burns weeks apart. These are deliberate, so LQR and RL are compared on identical, controlled conditions.
 
@@ -138,6 +157,13 @@ python scripts/08_train_ppo.py --steps 3000000 --name ppo_l1          # ~11 min,
 python scripts/08_train_ppo.py --steps 3000000 --action-power 1 --name ppo_l1_linear
 python scripts/07_compare_controllers.py --model dqn_l1_run2 ppo_l1 ppo_l1_linear --out phase5
 python scripts/09_robustness.py --model dqn_l1_run2 ppo_l1           # ~2 min
+# seed study: two more training seeds per configuration
+python scripts/08_train_ppo.py --steps 3000000 --seed 1 --name ppo_l1_s1
+python scripts/08_train_ppo.py --steps 3000000 --seed 2 --name ppo_l1_s2
+python scripts/08_train_ppo.py --steps 3000000 --seed 1 --action-power 1 --name ppo_l1_linear_s1
+python scripts/08_train_ppo.py --steps 3000000 --seed 2 --action-power 1 --name ppo_l1_linear_s2
+python scripts/10_seed_study.py                                      # ~10 min
+python scripts/09_robustness.py --model ppo_l1 ppo_l1_s1 ppo_l1_s2 --out robustness_seeds
 ```
 
 ```python

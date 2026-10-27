@@ -1,0 +1,23 @@
+{
+  "algo": "ppo",
+  "env": {
+    "action_type": "continuous",
+    "action_power": 1.0,
+    "w_pos": 0.3,
+    "w_fuel": 10.0
+  },
+  "train": {
+    "steps": 3000000,
+    "seed": 2,
+    "n_envs": 8,
+    "n_steps": 512,
+    "eval_every": 50000,
+    "lr": 0.0003,
+    "gamma": 0.99,
+    "log_std_init": -1.0,
+    "action_power": 1.0,
+    "w_pos": 0.3,
+    "w_fuel": 10.0,
+    "name": "ppo_l1_linear_s2"
+  }
+}
