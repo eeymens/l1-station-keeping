@@ -14,7 +14,7 @@ The Sun–Earth L1 point sits about 1.49 million km sunward of Earth. It is an e
 | --- | --- | --- |
 | 1 | CR3BP simulator, RK4 + DOP853, Jacobi-constant validation | Done |
 | 2 | Lagrange points, linear stability, uncontrolled escape from L1 | Done |
-| 3 | LQR baseline controller | Planned |
+| 3 | LQR baseline controller, fuel/accuracy trade-off | Done |
 | 4 | Gymnasium environment, DQN agent | Planned |
 | 5 | PPO agent, comparison experiments (Δv, tracking error, robustness) | Planned |
 | 6 | Paper | Planned |
@@ -35,6 +35,21 @@ The Sun–Earth L1 point sits about 1.49 million km sunward of Earth. It is an e
 **Integrator validation.** Over 10 years, DOP853 keeps the relative Jacobi-constant error below 10⁻¹³; fixed-step RK4 converges with measured order 3.92 (theory: 4).
 
 ![Jacobi constant drift and RK4 convergence](figures/jacobi_validation.png)
+
+**LQR station-keeping (phase 3).** A discrete-time LQR updates the thrust once per day from a noisy navigation estimate. Starting 1,000 km from L1, the uncontrolled spacecraft is lost (> 10,000 km) after 61 days; LQR brings it back and holds it for a full year.
+
+![LQR station-keeping](figures/lqr_station_keeping.png)
+
+Sweeping the fuel weight ρ over nine orders of magnitude (5 seeds each) gives the baseline the RL agents must beat:
+
+- **Holding** (start at L1): 0.03–0.94 m/s per year of Δv, for a mean distance of 1.34–0.39 km. Below ~0.4 km, navigation errors set the floor and extra fuel buys almost nothing.
+- **Acquisition** (start 1,000 km away): the cheapest gain (ρ = 3) needs 1.12 m/s. Lazier gains cost *more*, because the unstable mode keeps growing while the controller waits.
+
+![LQR fuel/accuracy trade-off](figures/lqr_pareto.png)
+
+Error model (1σ, illustrative assumptions): position 1 km, velocity 1 mm/s, thrust magnitude 2 %, pointing 1°. Raw results: `experiments/lqr_pareto.csv`.
+
+**Current simplifications.** The spacecraft holds the L1 point itself; real missions fly halo or Lissajous orbits around it (to keep the Sun out of the antenna beam). Motion is planar, and thrust is a low, continuous push updated daily rather than impulsive burns weeks apart. These are deliberate, so LQR and RL are compared on identical, controlled conditions.
 
 ## The model
 
@@ -59,10 +74,12 @@ git clone https://github.com/<your-username>/l1-station-keeping.git
 cd l1-station-keeping
 pip install -e ".[dev]"
 
-pytest                                  # 12 correctness tests
+pytest                                  # 22 correctness tests
 python scripts/01_lagrange_points.py    # table + figures/lagrange_points.png
 python scripts/02_jacobi_validation.py  # figures/jacobi_validation.png
 python scripts/03_l1_escape.py          # figures/l1_escape.png
+python scripts/04_lqr_station_keeping.py # figures/lqr_station_keeping.png
+python scripts/05_lqr_pareto.py         # figures/lqr_pareto.png (~30 s)
 ```
 
 ```python
@@ -85,6 +102,10 @@ src/cr3bp/
   dynamics.py      equations of motion, effective potential, Jacobi constant
   integrators.py   RK4 and DOP853
   lagrange.py      L1–L5, Hessian, linearisation, eigenvalue stability
+  control/
+    station_keeping.py   simulator: daily thrust, navigation/thrust errors, delta-v log
+    lqr.py               ZOH discretisation, discrete Riccati, LQR controller
+experiments/       raw CSV results
 scripts/           one script per figure
 tests/             pytest suite
 figures/           generated plots

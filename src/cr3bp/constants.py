@@ -28,6 +28,10 @@ TIME_UNIT_DAYS = SIDEREAL_YEAR_DAYS / (2.0 * math.pi)
 VELOCITY_UNIT_KMS = AU_KM / (TIME_UNIT_DAYS * 86_400.0)
 
 
+#: One nondimensional acceleration unit, in m/s^2 (~5.9e-3 m/s^2).
+ACCEL_UNIT_MPS2 = AU_KM * 1000.0 / (TIME_UNIT_DAYS * 86_400.0) ** 2
+
+
 def to_km(length):
     """Nondimensional length -> km."""
     return length * AU_KM
