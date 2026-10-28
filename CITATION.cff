@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use this code or its results, please cite it as below."
+title: "L1 Station-Keeping: LQR vs Reinforcement Learning"
+abstract: >-
+  Station-keeping at the unstable Sun-Earth L1 point in the planar circular
+  restricted three-body problem: an LQR baseline compared with DQN and PPO
+  agents on identical physics, errors and test seeds.
+authors:
+  - family-names: "Sargın"
+    given-names: "Emir Eymen"
+repository-code: "https://github.com/eeymens/l1-station-keeping"
+license: MIT
+version: 0.1.0
+date-released: 2026-10-28
+keywords:
+  - three-body problem
+  - Lagrange points
+  - station-keeping
+  - LQR
+  - reinforcement learning
+  - PPO
+  - DQN

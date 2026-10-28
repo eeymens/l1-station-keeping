@@ -1,0 +1,13 @@
+\begin{tabular}{lccccc}
+\toprule
+& \multicolumn{2}{c}{Holding (start at L1)} & \multicolumn{2}{c}{Recovery (start 1000 km)} & \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+Controller & $\Delta v$ [m/s] & mean / RMS dist.\ [km] & $\Delta v$ [m/s] & mean dist.\ [km] & Kept \\
+\midrule
+No control & 0 & lost after 250 d & 0 & lost after 61 d & 0\,\% \\
+LQR, $\rho = 3$ & 0.062 & 0.52 / 0.59 & 1.12 & 76 & 100\,\% \\
+DQN (run 2, seed 0) & 0.723 & 1.41 / 1.62 & 2.17 & 68 & 100\,\% \\
+PPO, linear map ($p=1$) & $0.393 \pm 0.039$ & $0.45 \pm 0.04$ / $0.51 \pm 0.04$ & $1.72 \pm 0.12$ & $72 \pm 14$ & 100\,\% \\
+PPO, cubic map ($p=3$) & $0.110 \pm 0.007$ & $0.57 \pm 0.17$ / $0.64 \pm 0.18$ & $1.46 \pm 0.18$ & $84 \pm 30$ & 100\,\% \\
+\bottomrule
+\end{tabular}

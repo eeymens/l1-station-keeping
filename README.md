@@ -6,6 +6,8 @@ The Sun–Earth L1 point sits about 1.49 million km sunward of Earth. It is an e
 
 **Short answer: no.** Across three training seeds, PPO with continuous thrust needs 1.3–2.7× LQR's fuel at the same accuracy while holding (DQN: 2–12×) and never beats LQR on fuel. One of the three PPO seeds also handled the thrust limit better than a saturated LQR, but the other two did not.
 
+📄 **Paper draft:** [`paper/main.pdf`](paper/main.pdf) · **Reproduce everything:** `make reproduce` (see [Reproducing the results](#reproducing-the-results))
+
 ![Uncontrolled drift away from L1](figures/l1_escape.png)
 
 *Left: distance from L1 grows exactly at the rate predicted by the unstable eigenvalue (λ = 2.533). Right: the escape trajectory in the rotating frame.*
@@ -19,9 +21,9 @@ The Sun–Earth L1 point sits about 1.49 million km sunward of Earth. It is an e
 | 3 | LQR baseline controller, fuel/accuracy trade-off | Done |
 | 4 | Gymnasium environment, DQN agent, comparison with LQR | Done |
 | 5 | PPO agent, comparison experiments (Δv, tracking error, robustness), 3 training seeds | Done |
-| 6 | Paper | Planned |
+| 6 | Paper draft (numbers generated from the CSVs), one-command reproduction, CI | Done |
 
-## Results so far
+## Results
 
 **Lagrange points (Sun–Earth, μ = 3.0034 × 10⁻⁶)**
 
@@ -112,7 +114,7 @@ The PPO column covers the cubic agent's three training seeds (`scripts/09_robust
 
 - **Noise.** No controller lost a single run at up to 8× the nominal errors (all 3 PPO training seeds). PPO's fuel overhead grows with noise, from 1.6–1.9× LQR at nominal to 4.0–5.6× at ×8: it reacts to navigation noise instead of averaging it out, while LQR's gain is linear in the error by construction.
 - **Unmodelled forces.** With a 100× stronger unmodelled force, LQR ρ = 3 drifts to 33 km RMS because its gain was tuned for nominal conditions; PPO holds 6–10 km with 1.7–1.9× the fuel. The two are no longer at the same point of the trade-off, so neither "wins" here.
-- **Large offsets and the thrust limit.** Apart from DQN at 5,000 km, every lost run started on the Sun–Earth line (0° or 180°), the direction of the unstable mode. A rough estimate of the mode's pull, λ²r, is 0.76 × 10⁻⁶ m/s² at 3,000 km and 1.27 × 10⁻⁶ m/s² at 5,000 km: at 5,000 km it exceeds the 10⁻⁶ m/s² limit, which is why all bounded controllers lose exactly those runs. At 3,000 km recovery is possible but only just: saturated LQR, whose gain ignores the limit, loses all 10 runs on the Sun–Earth line. PPO training seed 0 keeps them, at a cost of ~13 m/s and still 60–215 km off after a year, **but training seeds 1 and 2 lose exactly the same 10 runs as saturated LQR.** So the earlier claim that PPO handles the thrust limit better than saturated LQR does not hold across training seeds; it was a property of one run. Unlimited LQR keeps everything but needs up to 4.9 × 10⁻⁶ m/s².
+- **Large offsets and the thrust limit.** Apart from DQN at 5,000 km, every lost run started on the Sun–Earth line (0° or 180°), the direction of the unstable mode. A rough estimate of the mode's pull, λ²r, is 0.76 × 10⁻⁶ m/s² at 3,000 km and 1.27 × 10⁻⁶ m/s² at 5,000 km: at 5,000 km it exceeds the 10⁻⁶ m/s² limit, which is why all bounded controllers lose exactly those runs. At 3,000 km recovery is possible but only just: saturated LQR, whose gain ignores the limit, loses all 10 runs on the Sun–Earth line. PPO training seed 0 keeps them, at a cost of ~13 m/s and still 56–215 km off (RMS, second half of the year), **but training seeds 1 and 2 lose exactly the same 10 runs as saturated LQR.** So the earlier claim that PPO handles the thrust limit better than saturated LQR does not hold across training seeds; it was a property of one run. Unlimited LQR keeps everything but needs up to 4.9 × 10⁻⁶ m/s².
 
 ![Robustness sweeps](figures/robustness.png)
 
@@ -136,35 +138,34 @@ z''       = ∂Ω/∂z + u_z
 
 Velocity Verlet is not used because the Coriolis term depends on velocity, which breaks the scheme's symplectic property. RK4 (fixed step) drives the RL environment; DOP853 (adaptive, scipy) is the reference.
 
-## Quick start
+## Reproducing the results
 
 ```bash
-git clone https://github.com/<your-username>/l1-station-keeping.git
+git clone https://github.com/eeymens/l1-station-keeping.git
 cd l1-station-keeping
-pip install -e ".[dev]"
-pip install -e ".[rl]"                  # phase 4+: gymnasium, stable-baselines3
-
-pytest                                  # correctness tests
-python scripts/01_lagrange_points.py    # table + figures/lagrange_points.png
-python scripts/02_jacobi_validation.py  # figures/jacobi_validation.png
-python scripts/03_l1_escape.py          # figures/l1_escape.png
-python scripts/04_lqr_station_keeping.py # figures/lqr_station_keeping.png
-python scripts/05_lqr_pareto.py         # figures/lqr_pareto.png (~30 s)
-python scripts/06_train_dqn.py --steps 1000000 --lr 1e-4 --target-update 10000 \
-    --w-pos 0.3 --name dqn_l1_run2      # ~22 min on one CPU core
-python scripts/07_compare_controllers.py --model dqn_l1_run2
-python scripts/08_train_ppo.py --steps 3000000 --name ppo_l1          # ~11 min, 8 envs
-python scripts/08_train_ppo.py --steps 3000000 --action-power 1 --name ppo_l1_linear
-python scripts/07_compare_controllers.py --model dqn_l1_run2 ppo_l1 ppo_l1_linear --out phase5
-python scripts/09_robustness.py --model dqn_l1_run2 ppo_l1           # ~2 min
-# seed study: two more training seeds per configuration
-python scripts/08_train_ppo.py --steps 3000000 --seed 1 --name ppo_l1_s1
-python scripts/08_train_ppo.py --steps 3000000 --seed 2 --name ppo_l1_s2
-python scripts/08_train_ppo.py --steps 3000000 --seed 1 --action-power 1 --name ppo_l1_linear_s1
-python scripts/08_train_ppo.py --steps 3000000 --seed 2 --action-power 1 --name ppo_l1_linear_s2
-python scripts/10_seed_study.py                                      # ~10 min
-python scripts/09_robustness.py --model ppo_l1 ppo_l1_s1 ppo_l1_s2 --out robustness_seeds
+make install        # pip install -e ".[dev,rl]"  (CPU-only PyTorch is enough)
+make test           # pytest, 36 tests
+make reproduce      # every figure, CSV and paper number from the trained models (~10 min)
+make paper          # paper/main.pdf (needs LaTeX)
 ```
+
+`make reproduce` evaluates the trained agents in `models/`; it does not retrain them. Re-running it on the committed models reproduces the CSVs in `experiments/` exactly. `make train` retrains all eight agents from scratch (~2 h on one core); PyTorch's nondeterminism across machines means retrained agents will differ slightly from the committed ones. `make -n <target>` prints the individual commands, one script per figure:
+
+| Script | Output |
+| --- | --- |
+| `01_lagrange_points.py` | Lagrange-point table, `figures/lagrange_points.png` |
+| `02_jacobi_validation.py` | `figures/jacobi_validation.png` |
+| `03_l1_escape.py` | `figures/l1_escape.png` |
+| `04_lqr_station_keeping.py` | `figures/lqr_station_keeping.png` |
+| `05_lqr_pareto.py` | `experiments/lqr_pareto.csv`, `figures/lqr_pareto.png` |
+| `06_train_dqn.py` | `models/dqn_*`, training log and learning curve |
+| `07_compare_controllers.py` | `experiments/comparison_*.csv`, `figures/lqr_vs_*.png` |
+| `08_train_ppo.py` | `models/ppo_*`, training log and learning curve |
+| `09_robustness.py` | `experiments/robustness*.csv`, `figures/robustness*.png` |
+| `10_seed_study.py` | `experiments/seed_study*.csv`, `figures/seed_study.png` |
+| `11_paper_assets.py` | `paper/generated/` — every number and table in the paper |
+
+Package versions verified to reproduce the committed results: [`requirements-lock.txt`](requirements-lock.txt).
 
 ```python
 import numpy as np
@@ -197,6 +198,8 @@ experiments/       raw CSV results
 scripts/           one script per figure
 tests/             pytest suite
 figures/           generated plots
+paper/             manuscript (main.tex, references.bib, generated/ numbers and tables)
+Makefile           install, test, reproduce, paper, train
 ```
 
 ## References
@@ -205,6 +208,11 @@ figures/           generated plots
 - V. Szebehely, *Theory of Orbits: The Restricted Problem of Three Bodies*. Academic Press, 1967.
 - S. H. Strogatz, *Nonlinear Dynamics and Chaos*.
 - R. S. Sutton, A. G. Barto, *Reinforcement Learning: An Introduction*, 2nd ed. MIT Press, 2018.
+- Full reference list: [`paper/references.bib`](paper/references.bib).
+
+## Citing
+
+If you use this code or its results, please cite it via [`CITATION.cff`](CITATION.cff) (GitHub's "Cite this repository" button).
 
 ## License
 

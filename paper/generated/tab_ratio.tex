@@ -1,0 +1,16 @@
+\begin{tabular}{llccc}
+\toprule
+Thrust map & Training seed & Holding & Recovery & Best checkpoint \\
+\midrule
+cubic & 0 & 1.54 & 1.44 & 250k \\
+cubic & 1 & 1.31 & 1.13 & 250k \\
+cubic & 2 & 2.74 & dominated ($\geq 1.37$) & 200k \\
+\addlinespace
+linear & 0 & 4.48 & 1.61 & 2.95M \\
+linear & 1 & 5.92 & dominated ($\geq 1.48$) & 1.20M \\
+linear & 2 & 2.90 & dominated ($\geq 1.50$) & 2.90M \\
+\addlinespace
+cubic & mean $\pm$ std & $1.87 \pm 0.77$ & -- & \\
+linear & mean $\pm$ std & $4.43 \pm 1.51$ & -- & \\
+\bottomrule
+\end{tabular}

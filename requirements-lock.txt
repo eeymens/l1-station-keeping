@@ -1,0 +1,10 @@
+# Versions verified (Oct 2026) to reproduce the committed results exactly with `make reproduce` (Python 3.13, Linux x86_64).
+# Install with: pip install -r requirements-lock.txt && pip install -e . --no-deps
+numpy==2.5.3
+scipy==1.18.1
+matplotlib==3.11.2
+gymnasium==1.4.0
+stable-baselines3==2.9.2
+torch==2.14.1
+pytest==9.1.1
+cloudpickle==3.1.2
