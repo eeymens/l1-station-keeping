@@ -22,6 +22,7 @@ from ..constants import (ACCEL_UNIT_MPS2, AU_KM, MU_SUN_EARTH, TIME_UNIT_DAYS,
                          VELOCITY_UNIT_KMS)
 from ..dynamics import grad_potential
 from ..lagrange import lagrange_points
+from ..perturbations import mean_from_true, radius, rk4_er3bp, true_from_mean
 
 KM = 1.0 / AU_KM                                  # 1 km in length units
 MPS = 1.0 / (VELOCITY_UNIT_KMS * 1000.0)          # 1 m/s in velocity units
@@ -113,10 +114,14 @@ class StationKeepingSim:
         The episode fails once the spacecraft is farther than this from L1.
     seed : int, optional
         Seed for the random number generator.
+    perturbation : Perturbation, optional
+        Phase 7: Earth's orbital eccentricity and solar radiation pressure,
+        unknown to the controllers (see `cr3bp.perturbations`). ``None`` or a
+        null perturbation runs the original CR3BP code path, bit for bit.
     """
 
     def __init__(self, mu=MU_SUN_EARTH, dt_days=1.0, substep=2e-3, noise=None,
-                 r_fail_km=10_000.0, seed=None):
+                 r_fail_km=10_000.0, seed=None, perturbation=None):
         self.mu = mu
         self.l1 = lagrange_points(mu)["L1"][:2].copy()
         self.dt = dt_days / TIME_UNIT_DAYS
@@ -125,6 +130,8 @@ class StationKeepingSim:
         self.noise = NoiseModel() if noise is None else noise
         self.r_fail = r_fail_km * KM
         self.rng = np.random.default_rng(seed)
+        self.substep = substep
+        self.perturbation = perturbation
         self.reset()
 
     # ------------------------------------------------------------ state
@@ -136,7 +143,19 @@ class StationKeepingSim:
         self.state = np.r_[self.l1 + np.asarray(offset_km) * KM, np.asarray(vel_mps) * MPS]
         self.t = 0.0
         self.dv = 0.0
+        p = self.perturbation
+        if p is None or p.is_null:
+            self._f, self._M0, self._r = 0.0, 0.0, 1.0
+        else:
+            self._f = p.f0
+            self._M0 = mean_from_true(p.f0, p.e)
+            self._r = radius(p.f0, p.e)
         return self.observe()
+
+    @property
+    def sun_earth_au(self):
+        """Current Sun-Earth distance in AU (1 in the CR3BP)."""
+        return self._r
 
     @property
     def rel_state(self):
@@ -145,11 +164,12 @@ class StationKeepingSim:
 
     @property
     def distance_km(self):
-        return float(np.hypot(*self.rel_state[:2]) / KM)
+        """Physical distance from L1 (pulsating distance x Sun-Earth distance)."""
+        return float(np.hypot(*self.rel_state[:2]) * self._r / KM)
 
     @property
     def failed(self):
-        return np.hypot(*self.rel_state[:2]) > self.r_fail
+        return np.hypot(*self.rel_state[:2]) * self._r > self.r_fail
 
     def observe(self):
         """Navigation estimate of the relative state (true state + noise)."""
@@ -177,8 +197,18 @@ class StationKeepingSim:
         u = self._execute(u_cmd)
         d = self.rng.normal(0.0, self.noise.disturbance_mps2 * MPS2, 2)
         x, y, vx, vy = (float(v) for v in self.state)
-        self.state = np.array(_rk4_planar(x, y, vx, vy, self.mu, float(u[0] + d[0]),
-                                          float(u[1] + d[1]), self.h, self.n_sub))
+        p = self.perturbation
+        if p is None or p.is_null:
+            self.state = np.array(_rk4_planar(x, y, vx, vy, self.mu, float(u[0] + d[0]),
+                                              float(u[1] + d[1]), self.h, self.n_sub))
+        else:
+            f_end = true_from_mean(self._M0 + self.t + self.dt, p.e)
+            n = max(1, math.ceil((f_end - self._f) / self.substep))
+            self.state = np.array(rk4_er3bp(x, y, vx, vy, self.mu, p.e, p.a0,
+                                            float(u[0] + d[0]), float(u[1] + d[1]),
+                                            self._f, f_end, n))
+            self._f = f_end
+            self._r = radius(f_end, p.e)
         self.t += self.dt
         self.dv += float(np.hypot(*u)) * self.dt     # fuel actually spent
         return self.observe(), self.failed
@@ -191,6 +221,8 @@ def run_episode(sim, controller, days=365, offset_km=(1000.0, 0.0), vel_mps=(0.0
     acceleration (nondimensional). Pass ``None`` for an uncontrolled run.
     """
     obs = sim.reset(offset_km, vel_mps)
+    if hasattr(controller, "reset"):              # stateful controllers (LQI, bias-LQR)
+        controller.reset()
     n = int(round(days * 1.0 / (sim.dt * TIME_UNIT_DAYS)))
     t_days, dist, dv, pos = [0.0], [sim.distance_km], [0.0], [sim.rel_state[:2] / KM]
     survived = True

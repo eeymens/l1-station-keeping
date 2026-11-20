@@ -14,6 +14,7 @@ Metrics per episode
 import numpy as np
 
 from .control.station_keeping import StationKeepingSim, run_episode
+from .perturbations import Perturbation
 
 #: Scenario name -> starting offset from L1 in km (spacecraft at rest).
 SCENARIOS = {
@@ -25,12 +26,37 @@ SCENARIOS = {
 TEST_SEEDS = range(100, 120)
 
 
-def evaluate(controller, scenarios=SCENARIOS, seeds=range(5), days=365, noise=None):
-    """Fly `controller` on every scenario x seed. Returns a list of result rows."""
+def perturbation_for(k, seed, parts=("e", "srp")):
+    """Phase 7: the perturbation flown with episode seed `seed` at severity k.
+
+    Earth's starting true anomaly is drawn from its own generator (seed + 7919),
+    so the navigation and thrust errors stay identical draw for draw across
+    controllers *and* across k. ``parts`` switches the two effects on
+    individually. k = 0 returns None (original CR3BP code path).
+    """
+    if k == 0:
+        return None
+    f0 = float(np.random.default_rng(seed + 7919).uniform(0.0, 2 * np.pi))
+    p = Perturbation.from_k(k, f0=f0)
+    if "e" not in parts:
+        p.e = 0.0
+    if "srp" not in parts:
+        p.srp_mps2 = 0.0
+    return p
+
+
+def evaluate(controller, scenarios=SCENARIOS, seeds=range(5), days=365, noise=None,
+             perturbation_k=0.0, parts=("e", "srp")):
+    """Fly `controller` on every scenario x seed. Returns a list of result rows.
+
+    ``perturbation_k`` > 0 flies the phase-7 perturbed dynamics (see
+    `perturbation_for`); the default 0 is the nominal CR3BP of phases 3-6.
+    """
     rows = []
     for name, offset in scenarios.items():
         for seed in seeds:
-            sim = StationKeepingSim(seed=seed, noise=noise)
+            sim = StationKeepingSim(seed=seed, noise=noise,
+                                    perturbation=perturbation_for(perturbation_k, seed, parts))
             r = run_episode(sim, controller, days=days, offset_km=offset)
             d = r["dist_km"]
             rows.append({
