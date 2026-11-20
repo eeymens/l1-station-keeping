@@ -3,9 +3,10 @@
 #   make install     install the package with all extras
 #   make test        run the test suite
 #   make reproduce   regenerate every figure, CSV and paper number from the
-#                    trained models in models/ (~10 min on one core)
+#                    trained models in models/ (~1.5 h on one core, most of it
+#                    the phase-7 classical sweeps)
 #   make paper       build paper/main.pdf (needs a LaTeX distribution)
-#   make train       retrain every RL agent from scratch (~2 h on one core;
+#   make train       retrain every RL agent from scratch (~4.5 h on one core;
 #                    results will differ slightly from the committed models)
 #
 # Run `make -n <target>` to see the commands without running them.
@@ -13,7 +14,7 @@
 PYTHON ?= python
 S := scripts
 
-.PHONY: install test reproduce figures lqr evaluate paper-assets paper train clean-paper
+.PHONY: install test reproduce figures lqr evaluate mismatch paper-assets paper train clean-paper
 
 install:
 	$(PYTHON) -m pip install -e ".[dev,rl]"
@@ -21,7 +22,7 @@ install:
 test:
 	$(PYTHON) -m pytest -q
 
-reproduce: test figures lqr evaluate paper-assets
+reproduce: test figures lqr evaluate mismatch paper-assets
 
 # Phases 1-2: dynamics, Lagrange points, uncontrolled escape (seconds)
 figures:
@@ -43,6 +44,10 @@ evaluate:
 	$(PYTHON) $(S)/09_robustness.py --model ppo_l1 ppo_l1_s1 ppo_l1_s2 --out robustness_seeds
 	$(PYTHON) $(S)/10_seed_study.py
 
+# Phase 7: model mismatch (elliptic Earth orbit + solar radiation pressure)
+mismatch:
+	$(PYTHON) $(S)/12_model_mismatch.py
+
 # Phase 6: every number and table in the paper, from experiments/*.csv
 paper-assets:
 	$(PYTHON) $(S)/11_paper_assets.py
@@ -54,7 +59,7 @@ clean-paper:
 	cd paper && latexmk -C
 
 # Retraining overwrites models/ and the training logs. Each PPO run takes ~11 min
-# with 8 environments; DQN runs ~22 min each.
+# with 8 environments (domain-randomised phase-7 runs ~25 min); DQN runs ~22 min each.
 train:
 	$(PYTHON) $(S)/06_train_dqn.py --steps 1000000
 	$(PYTHON) $(S)/06_train_dqn.py --steps 1000000 --lr 1e-4 --target-update 10000 \
@@ -64,4 +69,8 @@ train:
 		$(PYTHON) $(S)/08_train_ppo.py --steps 3000000 --seed $$seed --name ppo_l1$$suffix; \
 		$(PYTHON) $(S)/08_train_ppo.py --steps 3000000 --seed $$seed --action-power 1 \
 			--name ppo_l1_linear$$suffix; \
+	done
+	for seed in 0 1 2 3 4; do \
+		$(PYTHON) $(S)/08_train_ppo.py --steps 3000000 --seed $$seed --dr-k-max 4 \
+			--eval-ks 0,1,2,4 --name ppo_dr_s$$seed; \
 	done
