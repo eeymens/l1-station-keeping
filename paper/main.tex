@@ -45,7 +45,15 @@ never reaches the LQR fuel--accuracy curve. Most of the DQN--LQR gap therefore
 came from the action representation, not from learning, but LQR remains
 Pareto-optimal. Two single-run findings did not survive retraining with new
 seeds, including an apparent advantage of PPO under a thrust limit; we report
-them as a cautionary example. Code and data are open source.
+them as a cautionary example. Finally, we fly every controller in dynamics its
+model does not contain: Earth's elliptic orbit and solar radiation pressure
+(SRP). The eccentricity barely matters, but SRP raises the fuel needed to hold
+$L_1$ about \mmDvGrowthKone-fold at realistic levels. PPO agents trained with
+domain randomisation hold $L_1$ under SRP more tightly than any default classical design
+and come within \mmDrHoldMin--\mmDrHoldMax$\times$ of the best of \mmDesigns\
+classical designs, but all \mmRlRuns\ RL test cases are still dominated once the
+classical side is allowed integral action or a disturbance estimator. Code and
+data are open source.
 \end{abstract}
 
 % ===========================================================================
@@ -113,6 +121,49 @@ conserved, which we use to validate the integrators. Over ten years, the
 adaptive DOP853 integrator \cite{hairer1993} keeps the relative error in $C$
 below $10^{-13}$, and the fixed-step RK4 integrator used inside the simulator
 converges with a measured order of 3.92 (theory: 4).
+
+\subsection{Unmodelled physics: elliptic orbit and solar radiation pressure}
+\label{sec:mismatch-model}
+
+All controllers in this paper are designed for, or trained in,
+\eqref{eq:cr3bp}. To test what happens when the real dynamics leave this model,
+Section~\ref{sec:mismatch} adds two of its largest omissions to the simulator
+only.
+
+\paragraph{Elliptic orbit.} The Earth's orbit has eccentricity $e = \eEarth$,
+so the Sun--Earth distance $r(f) = (1-e^2)/(1+e\cos f)$ changes with the true
+anomaly $f$ and $L_1$ moves with it. Following Szebehely \cite{szebehely1967}
+we rotate with the Sun--Earth line, scale lengths by $r(f)$ and use $f$ as the
+independent variable. In these \emph{pulsating} coordinates the Lagrange
+points keep their CR3BP positions and (with $' = d/df$)
+\begin{equation}
+x'' - 2y' = w\,\frac{\partial \Omega}{\partial x} + g\,u_x, \qquad
+y'' + 2x' = w\,\frac{\partial \Omega}{\partial y} + g\,u_y, \qquad
+w = \frac{1}{1 + e\cos f}, \quad g = \frac{(1-e^2)^2}{(1+e\cos f)^3},
+\label{eq:er3bp}
+\end{equation}
+where $g = r^3/(1-e^2)$ converts a physical acceleration into pulsating units
+via Kepler's second law. With $e = 0$ we recover \eqref{eq:cr3bp} exactly. The
+controller still acts once per physical day; each day is mapped to an interval
+of $f$ with Kepler's equation. Distances are reported in physical kilometres
+(pulsating distance $\times\, r(f)$).
+
+\paragraph{Solar radiation pressure.} Sunlight pushes the spacecraft away from
+the Sun with $a_0 = P\,C_r\,(A/m) = \srpAccel$~m/s$^2$ at 1~AU, using
+$P = \srpP$~N/m$^2$ \cite{montenbruck2000}, $C_r = \srpCr$ and an assumed
+$A/m = \srpAm$~m$^2$/kg. This is only \srpPctLimit\,\% of the thrust limit,
+but it always points the same way: cancelling it completely costs
+\srpDvYear~m/s per year, 20--30 times the nominal holding cost. In
+\eqref{eq:er3bp} SRP simply lowers the Sun's effective mass from $1-\mu$ to
+$1-\mu-a_0$, which moves the equilibrium \srpShiftKm~km sunward of $L_1$.
+
+\paragraph{Severity.} A single factor $k$ scales both effects:
+$e = k \cdot \eEarth$ and $a = k \cdot a_0$, with $k = 0$ the CR3BP (bit for bit
+the same simulation) and $k = 1$ the realistic values. Each test seed also
+fixes the season ($f$ at $t = 0$) from a separate random stream, so the
+navigation and thrust errors stay identical across controllers and across $k$.
+A brute-force integration in an inertial frame, with the Sun and the Earth on
+Kepler ellipses, agrees with \eqref{eq:er3bp} to better than 1~m after 30 days.
 
 \subsection{Lagrange points and linear stability}
 
@@ -211,6 +262,32 @@ less thrust and looser tracking. The controller is $\mathbf{u}_k = -K
 without a filter. As a reference we use $\rho = 3$, the cheapest recovery in an
 initial sweep.
 
+\subsection{Disturbance-aware classical controllers}
+\label{sec:lqi}
+
+Under a constant force such as SRP, pure state feedback $\mathbf{u} = -K\mathbf{x}$
+settles with a steady-state offset. This is a textbook limitation with
+textbook fixes, so for Section~\ref{sec:mismatch} we add two of them.
+\emph{LQI} augments the state with the integrated position error
+$\mathbf{z}_{k+1} = \mathbf{z}_k + \Delta t\,\mathbf{r}_k$ and designs one LQR for
+the augmented system (with conditional integration against wind-up); it holds
+exactly at $L_1$ and cancels the force with thrust. \emph{Bias-LQR} runs a
+steady-state Kalman filter on $[\mathbf{x}; \mathbf{d}]$ with a constant
+disturbance model $\mathbf{d}_{k+1} = \mathbf{d}_k$, computes the cheapest steady
+state the linear model can hold against $\hat{\mathbf{d}}$,
+\begin{equation}
+(\mathbf{x}_{ss}, \mathbf{u}_{ss}) = \arg\min\; \mathbf{x}^\top Q \mathbf{x} +
+\mathbf{u}^\top R \mathbf{u}
+\quad\text{s.t.}\quad (A_d - I)\mathbf{x} + B_d(\mathbf{u} + \hat{\mathbf{d}}) = 0,
+\end{equation}
+and applies $\mathbf{u} = \mathbf{u}_{ss} - K(\hat{\mathbf{x}} - \mathbf{x}_{ss})$,
+as in offset-free model predictive control \cite{pannocchia2003}. With a large
+$\rho$ it parks where gravity alone balances the force. All three classical
+families keep the nominal CR3BP model. Under strong mismatch the tightest
+tracking of the $r_\text{ref} = 1000$~km design is limited by the velocity
+weight rather than by $\rho$, so we sweep $r_\text{ref} \in \{1000, 100,
+10\}$~km as well, \mmDesigns\ designs in total.
+
 \subsection{Reinforcement learning environment}
 
 The RL agents fly the same simulator through a Gymnasium interface. The
@@ -259,6 +336,14 @@ $\frac{1}{2}\sum_\text{scen} \bigl(100\,\tfrac{\text{days kept}}{365} -
 kept. Each PPO configuration was trained with three training seeds (0, 1, 2)
 and otherwise identical settings, \ppoSteps\ steps each with \ppoEnvs\ parallel
 environments (about 11~minutes on one CPU core per run).
+
+\paragraph{Domain randomisation (Section~\ref{sec:mismatch}).} Five further
+PPO agents (cubic map, training seeds 0--4, all hyperparameters unchanged) are
+trained with domain randomisation \cite{tobin2017}: every episode draws
+$k \sim U(0, 4)$, the season $f_0 \sim U(0, 2\pi)$ and an SRP area-to-mass
+factor $\sim U(0.5, 1.5)$. Model selection uses the mean score at
+$k = 0, 1, 2, 4$, still on seeds 0--4 only. The observation is unchanged, so
+these agents have no memory from which to infer the current SRP.
 
 \begin{table}[t]
 \centering
@@ -323,6 +408,7 @@ the full year.}
 \end{table}
 
 \subsection{Fair comparison at the same accuracy}
+\label{sec:ratio}
 
 The agents do not track at exactly the accuracy of LQR with $\rho = 3$, and
 fuel can always be traded for accuracy. We therefore compare each model with
@@ -445,6 +531,87 @@ about \ppoThreeDv~m/s, and we initially reported this as an advantage of RL.
 \textbf{Training seeds 1 and 2 lose exactly the same runs as saturated LQR}, so
 this was a property of one training run, not of the method.
 
+\subsection{Model mismatch}
+\label{sec:mismatch}
+
+Table~\ref{tab:mismatch} and Fig.~\ref{fig:mismatch} fly every controller in
+the perturbed dynamics of Section~\ref{sec:mismatch-model}. The classical
+controllers and the nominal PPO agents are exactly those of the previous
+sections. ``$\times$ best classical'' divides a model's $\dv$ by that of the
+cheapest classical design (any family, $\rho$ and $r_\text{ref}$) that tracks
+at least as tightly; the interpolated ratio of Section~\ref{sec:ratio} is
+undefined here because the LQR curve itself changes shape (below).
+
+\begin{table}[t]
+\centering
+\caption{Model mismatch, test seeds 100--119. $k$ scales Earth's
+eccentricity and SRP ($k = 1$ realistic). LQR and Bias-LQR use $\rho = 1$,
+$r_\text{ref} = 1000$~km; PPO is mean over 3 training seeds, DR-PPO over 5.
+The last two columns are mean $\pm$ std over training seeds. Every run was
+kept for the full year.}
+\label{tab:mismatch}
+\small
+\input{generated/tab_mismatch}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{paper_mismatch}
+\caption{Fuel/accuracy plane without mismatch ($k = 0$), at realistic SRP and
+eccentricity ($k = 1$) and at four times both ($k = 4$). Lines: lower envelope
+of each classical family over $\rho$ and $r_\text{ref}$. Markers: PPO (3
+training seeds) and DR-PPO (5 training seeds). All severities are in
+\texttt{figures/model\_mismatch\_pareto.png}.}
+\label{fig:mismatch}
+\end{figure}
+
+\paragraph{The eccentricity is nearly harmless; SRP is not.}
+Flying the two effects separately shows that even
+$e = \mmEccKfour$ ($k = 4$) leaves LQR's holding cost at \mmEccDvKfour~m/s
+(nominal: \mmNomDvLqr). In pulsating coordinates $L_1$ is still an
+equilibrium, and the eccentricity only modulates forces that are proportional
+to the distance from it, which is a few kilometres here. (It matters much more
+for halo orbits with amplitudes of $10^5$~km.) All of the change comes from
+SRP. At $k = 1$, LQR with $\rho = 1$ drifts to \mmLqrHoldDistKone~km and spends
+\mmLqrHoldDvKone~m/s, about \mmDvGrowthKone\ times its nominal cost.
+
+\paragraph{The LQR trade-off turns around.}
+Under SRP, looser LQR gains no longer save fuel. The offset grows
+\emph{away} from the Sun, in the direction the force pushes, and along that
+axis $L_1$ is unstable, so gravity adds to the load instead of cancelling it.
+Loosening the gain at $k = 4$ makes LQR both farther and more expensive, and
+even its tightest $r_\text{ref} = 1000$~km design stays \mmLqrTightKfour~km
+away. Bias-LQR estimates the force and parks on the \emph{sunward} side, where
+gravity does balance it: at $k = 1$ its cheapest design spends
+\mmCheapDvKone~m/s at \mmCheapDistKone~km.
+
+\paragraph{Nominal PPO degrades gracefully, DR-PPO nearly closes the gap.}
+No RL agent lost a run. The nominal PPO agents, never trained on SRP, need
+\mmPpoHoldMin--\mmPpoHoldMax$\times$ the best classical fuel while holding and
+\mmPpoAcqMin--\mmPpoAcqMax$\times$ in recovery, with large seed-to-seed spread.
+The domain-randomised agents hold $L_1$ to within \mmDrDistMin--\mmDrDistMax~km
+at every $k > 0$, tighter than any $\rho = 1$ classical design, and need only
+\mmDrHoldMin--\mmDrHoldMax$\times$ the best classical fuel at their accuracy
+(\mmDrAcqMin--\mmDrAcqMax$\times$ in recovery). Two caveats keep this from
+being a win. First, near $L_1$ every controller must pay roughly the full SRP
+cancellation cost, which pushes all ratios towards one; in absolute terms
+DR-PPO still spends \mmDrExcessMin--\mmDrExcessMax~m/s per year more than the
+best classical design. Second, \textbf{all \mmRlDominated\ of \mmRlRuns\ RL test
+cases are dominated} by some classical design that is both cheaper and at least
+as accurate; in \mmBiasBest\ of them the cheapest such design is a Bias-LQR,
+often with a tighter position scale ($r_\text{ref} = 10$ or 100~km). Without
+the wider $r_\text{ref}$ sweep, DR-PPO at $k = 4$ would have looked more
+accurate than every classical design, a conclusion that came only from tuning
+the classical side too narrowly.
+
+\paragraph{The price of robustness.}
+In the nominal problem ($k = 0$) the domain-randomised agents are worse:
+\mmDrRatioKzero$\times$ the best classical fuel, at \mmDrDistKzero~km. With no
+memory they cannot tell whether SRP is present, so they thrust as if an
+average SRP were acting: DR-PPO seed 0 holds \mmDrSunwardKzero~km sunward of
+$L_1$ when there is no SRP at all. Bias-LQR solves exactly this problem with a
+Kalman filter.
+
 % ===========================================================================
 \section{Discussion}
 
@@ -475,14 +642,26 @@ Henderson et~al.\ \cite{henderson2018} and Agarwal et~al.\ \cite{agarwal2021}.
 Three seeds are still few; the ranges we report should be read as the minimum
 variability, not a confidence interval.
 
+\paragraph{Model mismatch helps RL, but the classical toolbox helps more.}
+Plain LQR, tuned for the CR3BP, does degrade under SRP, and a domain-randomised
+policy is the more robust of the two out of the box. But the classical answer
+to an unmodelled constant force (integral action or a disturbance estimator)
+is decades old and only a few lines of code, and with it the classical
+controllers stay Pareto-optimal. The setting in which we would expect RL to
+gain is one where the missing physics cannot be summarised as a slowly
+varying bias, or where it can only be inferred from a history of
+observations. That calls for a recurrent or history-based policy.
+
 \paragraph{Limitations.}
 \label{sec:limits}
 The problem is planar and holds the point itself, not a halo or Lissajous
 orbit, so the absolute $\dv$ values should not be compared with real missions.
 Thrust is a small continuous push updated daily, rather than impulsive
-manoeuvres weeks apart. Neither controller uses a state estimator: a Kalman
-filter would help both, and would probably help PPO more, since it is the more
-sensitive to navigation noise. The RL reward and the LQR cost are different
+manoeuvres weeks apart. Only Bias-LQR uses a state estimator; giving one (or a
+memory) to the RL agents is the most obvious next step. The unmodelled physics
+of Section~\ref{sec:mismatch} is limited to the eccentricity and SRP; the Moon,
+the planets and a full ephemeris model are not included, and the SRP
+area-to-mass ratio is an assumption. The RL reward and the LQR cost are different
 functions, which is why we compare on the measured fuel--accuracy plane
 instead. Finally, we tuned the RL hyperparameters only lightly; better tuning
 could narrow the gap, but the agents would still have to beat a controller that
@@ -497,9 +676,14 @@ on identical physics and errors. Most of the initial gap between DQN and LQR
 came from the coarse discrete action set: with a continuous action and a cubic
 thrust map, PPO reaches the right thrust scale and needs
 \cubRatioMin--\cubRatioMax$\times$ LQR's fuel at the same accuracy instead of
-\dqnRatioMin--\dqnRatioMax$\times$. Natural next steps are halo-orbit
-station-keeping in three dimensions, adding a navigation filter to both
-controllers, and hybrid designs in which a learned policy corrects a linear
+\dqnRatioMin--\dqnRatioMax$\times$. When solar radiation pressure, which the
+controllers do not model, is added, plain LQR degrades and a domain-randomised
+PPO agent comes within \mmDrHoldMin--\mmDrHoldMax$\times$ of the best classical
+fuel. Classical controllers with integral action or a disturbance estimator
+still dominate it, and Earth's eccentricity has almost no effect on holding the
+point. Natural next steps are halo-orbit
+station-keeping in three dimensions (where the eccentricity matters), RL
+policies with memory that can infer unmodelled forces, and hybrid designs in which a learned policy corrects a linear
 controller only where the linearisation fails.
 
 \section*{Reproducibility}

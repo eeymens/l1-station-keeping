@@ -1,7 +1,7 @@
 """Phase 6: every number and table in the paper, generated from the results.
 
 Nothing in paper/main.tex is typed by hand: this script reads the raw CSVs in
-experiments/ (written by scripts 05, 07, 09 and 10), recomputes the few
+experiments/ (written by scripts 05, 07, 09, 10 and 12), recomputes the few
 quantities that need a simulation (thrust statistics, the unstable mode's pull,
 the Lagrange-point table), and writes
 
@@ -472,6 +472,152 @@ COL = {"LQR": "#2471a3", "cubic": "#d68910", "linear": "#7d3c98", "DQN": "#c0392
 SEED_MARKERS = ("o", "s", "^")
 
 
+# ---------------------------------------------------------------- 7. model mismatch
+def mismatch():
+    """Phase 7 (scripts/12_model_mismatch.py): ER3BP + SRP unknown to the controllers."""
+    from scipy.optimize import brentq
+
+    from cr3bp.evaluation import perturbation_for
+    from cr3bp.perturbations import (AREA_TO_MASS_DEFAULT, CR_DEFAULT, E_EARTH, P_SUN_NPM2,
+                                     SRP_DEFAULT_MPS2, Perturbation)
+
+    mu = MU_SUN_EARTH
+    l1x = lagrange_points(mu)["L1"][0]
+    a0 = Perturbation(srp_mps2=SRP_DEFAULT_MPS2).a0
+    dodx = lambda x: (x - (1 - mu - a0) * (x + mu) / abs(x + mu) ** 3  # noqa: E731
+                      - mu * (x - 1 + mu) / abs(x - 1 + mu) ** 3)
+    shift_km = (brentq(dodx, l1x - 1e-3, l1x + 1e-4, xtol=1e-16) - l1x) * AU_KM
+    macro("eEarth", f"{E_EARTH:.4f}")
+    macro("srpP", sci(P_SUN_NPM2, 3))
+    macro("srpCr", f"{CR_DEFAULT:.1f}")
+    macro("srpAm", f"{AREA_TO_MASS_DEFAULT:g}")
+    macro("srpAccel", sci(SRP_DEFAULT_MPS2, 2))
+    macro("srpPctLimit", f"{100 * SRP_DEFAULT_MPS2 / 1e-6:.0f}")
+    macro("srpDvYear", num(SRP_DEFAULT_MPS2 * 365.25 * 86400, 1))
+    macro("srpShiftKm", f"{abs(shift_km):.0f}")
+
+    rows = load("model_mismatch.csv")
+    cls = load("model_mismatch_classical.csv")
+    parts = load("model_mismatch_parts.csv")
+    f = lambda r, k: float(r[k])  # noqa: E731
+
+    def one(fam, k, scen, seed):
+        return next(r for r in rows if r["family"] == fam and float(r["k"]) == k
+                    and r["scenario"] == scen and r["train_seed"] == seed)
+
+    def seeds(fam, k, scen):
+        return [r for r in rows if r["family"] == fam and float(r["k"]) == k
+                and r["scenario"] == scen and r["train_seed"] not in ("mean", "std")]
+
+    macro("mmDesigns", str(len({(r["family"], r["r_ref_km"], r["rho"]) for r in cls})))
+    lqr1 = one("LQR", 1.0, "holding", "-1")
+    macro("mmLqrHoldDvKone", num(f(lqr1, "dv_mps"), 2))
+    macro("mmLqrHoldDistKone", f"{f(lqr1, 'mean_dist_km'):.0f}")
+    macro("mmLqrRatioKone", num(f(lqr1, "best_classical_ratio"), 2))
+    lqr0 = one("LQR", 0.0, "holding", "-1")
+    macro("mmDvGrowthKone", f"{f(lqr1, 'dv_mps') / f(lqr0, 'dv_mps'):.0f}")
+    # cheapest classical design at k = 1 (parks near the shifted equilibrium)
+    c1 = [r for r in cls if float(r["k"]) == 1.0 and r["scenario"] == "holding"
+          and float(r["survival"]) == 1.0]
+    cheap = min(c1, key=lambda r: f(r, "dv_mps"))
+    macro("mmCheapFamKone", cheap["family"])
+    macro("mmCheapDvKone", num(f(cheap, "dv_mps"), 2))
+    macro("mmCheapDistKone", f"{f(cheap, 'mean_dist_km'):.0f}")
+    # tightest LQR (any rho / r_ref) vs tightest of all at k = 4, holding
+    c4 = [r for r in cls if float(r["k"]) == 4.0 and r["scenario"] == "holding"
+          and float(r["survival"]) == 1.0]
+    lq4 = [r for r in c4 if r["family"] == "LQR" and float(r["r_ref_km"]) == 1000.0]
+    macro("mmLqrTightKfour", f"{min(f(r, 'mean_dist_km') for r in lq4):.0f}")
+
+    # PPO / DR-PPO ratios to the best classical design
+    def rng_ratio(fam, scen, ks, key="best_classical_ratio"):
+        v = [f(r, key) for k in ks for r in seeds(fam, k, scen)]
+        return min(v), max(v)
+
+    pert = (0.5, 1.0, 2.0, 4.0)
+    lo, hi = rng_ratio("PPO", "holding", pert)
+    macro("mmPpoHoldMin", num(lo, 2))
+    macro("mmPpoHoldMax", num(hi, 2))
+    lo, hi = rng_ratio("PPO", "acquisition", pert)
+    macro("mmPpoAcqMin", num(lo, 2))
+    macro("mmPpoAcqMax", num(hi, 2))
+    lo, hi = rng_ratio("DR-PPO", "holding", pert)
+    macro("mmDrHoldMin", num(lo, 2))
+    macro("mmDrHoldMax", num(hi, 2))
+    lo, hi = rng_ratio("DR-PPO", "acquisition", pert)
+    macro("mmDrAcqMin", num(lo, 2))
+    macro("mmDrAcqMax", num(hi, 2))
+    lo, hi = rng_ratio("DR-PPO", "holding", pert, "excess_dv_mps")
+    macro("mmDrExcessMin", num(lo, 2))
+    macro("mmDrExcessMax", num(hi, 2))
+    dr1 = one("DR-PPO", 1.0, "holding", "mean")
+    macro("mmDrDistKone", num(f(dr1, "mean_dist_km"), 1))
+    macro("mmDrDvKone", num(f(dr1, "dv_mps"), 2))
+    d = [f(r, "mean_dist_km") for k in pert for r in seeds("DR-PPO", k, "holding")]
+    macro("mmDrDistMin", num(min(d), 1))
+    macro("mmDrDistMax", num(max(d), 1))
+    dr0 = one("DR-PPO", 0.0, "holding", "mean")
+    macro("mmDrDistKzero", num(f(dr0, "mean_dist_km"), 1))
+    macro("mmDrRatioKzero", num(f(dr0, "best_classical_ratio"), 1))
+    rl = [r for r in rows if r["family"] in ("PPO", "DR-PPO")
+          and r["train_seed"] not in ("mean", "std")]
+    macro("mmRlRuns", str(len(rl)))
+    macro("mmRlDominated", str(sum(f(r, "dominated") == 1.0 for r in rl)))
+    best_fam = []
+    for r in rl:
+        pts = [c for c in cls if float(c["k"]) == float(r["k"]) and c["scenario"] == r["scenario"]
+               and float(c["survival"]) == 1.0
+               and f(c, "mean_dist_km") <= f(r, "mean_dist_km")]
+        best_fam.append(min(pts, key=lambda c: f(c, "dv_mps"))["family"])
+    macro("mmBiasBest", str(best_fam.count("Bias-LQR")))
+    macro("mmRlKept", f"{100 * np.mean([f(r, 'survival') for r in rl]):.0f}")
+
+    # eccentricity alone: LQR rho = 1, holding, k = 4, vs nominal
+    e4 = [r for r in parts if float(r["k"]) == 4.0 and r["effect"] == "eccentricity only"
+          and r["family"] == "LQR" and r["scenario"] == "holding"][0]
+    macro("mmEccDvKfour", num(f(e4, "dv_mps"), 3))
+    macro("mmNomDvLqr", num(f(lqr0, "dv_mps"), 3))
+    macro("mmEccKfour", f"{4 * E_EARTH:.3f}")
+
+    # DR-PPO's sunward bias at k = 0 (days 100-365, holding, test seeds)
+    _, dr_ctrl = load_policy(ROOT / "models", "ppo_dr_s0")
+    xs = []
+    for seed in TEST_SEEDS:
+        sim = StationKeepingSim(seed=seed, perturbation=perturbation_for(0.0, seed))
+        xs.append(run_episode(sim, dr_ctrl, offset_km=(0.0, 0.0))["pos_km"][100:, 0].mean())
+    macro("mmDrSunwardKzero", num(-float(np.mean(xs)), 1))
+
+    # table
+    lines = []
+    for scen, title in (("holding", "Holding"), ("acquisition", "Recovery")):
+        lines.append(rf"\multicolumn{{8}}{{l}}{{\emph{{{title}}}}} \\")
+        for k in (0.0, 0.5, 1.0, 2.0, 4.0):
+            def cell(r):
+                dist = f(r, "mean_dist_km")
+                return rf"{f(r, 'dv_mps'):.2f} ({dist:.0f})" if dist >= 10 else \
+                    rf"{f(r, 'dv_mps'):.2f} ({dist:.1f})"
+            cells = [cell(one("LQR", k, scen, "-1")), cell(one("Bias-LQR", k, scen, "-1")),
+                     cell(one("PPO", k, scen, "mean")), cell(one("DR-PPO", k, scen, "mean"))]
+            for fam in ("PPO", "DR-PPO"):
+                m, sd = one(fam, k, scen, "mean"), one(fam, k, scen, "std")
+                cells.append(rf"${f(m, 'best_classical_ratio'):.2f} \pm "
+                             rf"{f(sd, 'best_classical_ratio'):.2f}$")
+            lines.append(rf"{k:g} & " + " & ".join(cells) + r" \\")
+        if scen == "holding":
+            lines.append(r"\addlinespace")
+    write_table("tab_mismatch.tex", r"""
+\begin{tabular}{lcccccc}
+\toprule
+ & \multicolumn{4}{c}{$\dv$ [m/s] (mean distance [km])} & \multicolumn{2}{c}{$\times$ best classical} \\
+\cmidrule(lr){2-5}\cmidrule(lr){6-7}
+$k$ & LQR & Bias-LQR & PPO & DR-PPO & PPO & DR-PPO \\
+\midrule
+""" + "\n".join(lines).replace(r"\multicolumn{8}", r"\multicolumn{7}") + r"""
+\bottomrule
+\end{tabular}""")
+
+
+
 def _style():
     import matplotlib.pyplot as plt
     plt.rcParams.update({
@@ -595,10 +741,56 @@ def figures():
     plt.close(fig)
 
 
+def mismatch_figure():
+    """Compact fuel/accuracy plane at k = 0, 1, 4 for the paper (from the CSVs)."""
+    plt = _style()
+    cls = load("model_mismatch_classical.csv")
+    rows = [r for r in load("model_mismatch.csv")
+            if r["family"] in ("PPO", "DR-PPO") and r["train_seed"] not in ("mean", "std")]
+    col = {"LQR": "#2471a3", "LQI": "#1e8449", "Bias-LQR": "#5d6d7e",
+           "PPO": "#d68910", "DR-PPO": "#c0392b"}
+    fig, axes = plt.subplots(2, 3, figsize=(6.3, 4.3))
+    for i, scen in enumerate(("holding", "acquisition")):
+        for j, k in enumerate((0.0, 1.0, 4.0)):
+            ax = axes[i, j]
+            for fam in ("LQR", "LQI", "Bias-LQR"):
+                pts = sorted(((float(c["mean_dist_km"]), float(c["dv_mps"])) for c in cls
+                              if float(c["k"]) == k and c["scenario"] == scen
+                              and c["family"] == fam and float(c["survival"]) == 1.0))
+                env, best = [], float("inf")
+                for d, v in pts:
+                    if v < best:
+                        env.append((d, v))
+                        best = v
+                ax.plot(*zip(*env), "-", color=col[fam], lw=1.2, label=fam)
+            for fam, mk in (("PPO", "o"), ("DR-PPO", "^")):
+                sel = [r for r in rows if r["family"] == fam and float(r["k"]) == k
+                       and r["scenario"] == scen]
+                ax.plot([float(r["mean_dist_km"]) for r in sel], [float(r["dv_mps"]) for r in sel],
+                        mk, color=col[fam], ms=3.5, mec="white", mew=0.4, label=fam)
+            ax.set_xscale("log")
+            ax.set_yscale("log")
+            _plain_log(ax)
+            ax.set_title(f"({'abc'[j] if i == 0 else 'def'[j]}) "
+                         f"{'Holding' if scen == 'holding' else 'Recovery'}, $k = {k:g}$",
+                         loc="left")
+            ax.grid(True, which="major", color="#e6e6e6", lw=0.5)
+            ax.set_axisbelow(True)
+            if j == 0:
+                ax.set_ylabel(r"$\Delta v$ per year [m/s]")
+            if i == 1:
+                ax.set_xlabel("mean distance [km]")
+    h, lab = axes[0, 0].get_legend_handles_labels()
+    fig.legend(h, lab, loc="lower center", ncol=5, frameon=False, bbox_to_anchor=(0.5, -0.01))
+    fig.tight_layout(rect=(0, 0.05, 1, 1), w_pad=0.8, h_pad=0.8)
+    fig.savefig(ROOT / "figures" / "paper_mismatch.pdf")
+    plt.close(fig)
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     for step in (dynamics, lqr_phase3, comparison, ratios, robustness, thrust_logs,
-                 hyperparameters, figures):
+                 hyperparameters, mismatch, figures, mismatch_figure):
         step()
         print(f"{step.__name__} done", flush=True)
     text = "% Generated by scripts/11_paper_assets.py -- do not edit by hand.\n"

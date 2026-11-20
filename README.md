@@ -6,6 +6,8 @@ The Sun–Earth L1 point sits about 1.49 million km sunward of Earth. It is an e
 
 **Short answer: no.** Across three training seeds, PPO with continuous thrust needs 1.3–2.7× LQR's fuel at the same accuracy while holding (DQN: 2–12×) and never beats LQR on fuel. One of the three PPO seeds also handled the thrust limit better than a saturated LQR, but the other two did not.
 
+**Phase 7: what if the real physics differs from the model?** With solar radiation pressure (SRP) and Earth's elliptic orbit added to the simulator only, plain LQR degrades (≈30× the nominal fuel at realistic SRP) and PPO trained with domain randomisation gets within 1.01–1.13× of the best classical fuel while holding L1 to 0.8–3 km. But once the classical side gets its textbook fixes (integral action, a Kalman disturbance estimator), all 80 RL test cases are still dominated. The eccentricity alone has almost no effect; SRP is what matters.
+
 📄 **Paper draft:** [`paper/main.pdf`](paper/main.pdf) · **Reproduce everything:** `make reproduce` (see [Reproducing the results](#reproducing-the-results))
 
 ![Uncontrolled drift away from L1](figures/l1_escape.png)
@@ -22,6 +24,7 @@ The Sun–Earth L1 point sits about 1.49 million km sunward of Earth. It is an e
 | 4 | Gymnasium environment, DQN agent, comparison with LQR | Done |
 | 5 | PPO agent, comparison experiments (Δv, tracking error, robustness), 3 training seeds | Done |
 | 6 | Paper draft (numbers generated from the CSVs), one-command reproduction, CI | Done |
+| 7 | Model mismatch: elliptic Earth orbit + solar radiation pressure, LQI and Kalman bias-estimating LQR, domain-randomised PPO (5 seeds) | Done |
 
 ## Results
 
@@ -120,6 +123,36 @@ The PPO column covers the cubic agent's three training seeds (`scripts/09_robust
 
 Raw results: `experiments/comparison_phase5.csv`, `experiments/robustness.csv` (training seed 0 only), `experiments/seed_study.csv` (+ `seed_study_lqr.csv`, the 57-point LQR sweep), `experiments/robustness_seeds.csv`.
 
+**Model mismatch (phase 7).** Everything above uses the circular restricted three-body problem (CR3BP) for both the controllers and the simulator. Phase 7 adds two pieces of physics to the *simulator only* (`src/cr3bp/perturbations.py`), so every controller meets dynamics it was not designed for:
+
+- **Earth's elliptic orbit** (e = 0.0167), in pulsating rotating coordinates (Szebehely 1967): lengths scale with the instantaneous Sun–Earth distance and true anomaly replaces time, so L1 stays at its CR3BP position and e = 0 gives back the CR3BP exactly (tested bit for bit). A brute-force integration in an inertial frame with the Sun and Earth on Kepler ellipses agrees to < 1 m after 30 days.
+- **Solar radiation pressure**: 4.56 × 10⁻⁶ N/m² × C_r 1.3 × A/m 0.01 m²/kg ≈ 5.9 × 10⁻⁸ m/s² at 1 AU (C_r and A/m are assumptions). Only 6 % of the thrust limit, but always in the same direction: cancelling it costs ~1.9 m/s per year, and it moves the equilibrium 167 km sunward.
+
+A severity k scales both (e = k × 0.0167, SRP × k; k = 1 realistic, k = 4 four times). New controllers, so the classical side is not left weak against a constant force: **LQI** (LQR + integral action, holds exactly at L1) and **Bias-LQR** (Kalman filter estimating state + constant force, LQR around the cheapest steady state; it parks where gravity balances SRP). **DR-PPO**: 5 PPO agents (training seeds 0–4, unchanged hyperparameters) trained with domain randomisation, k ~ U(0, 4), random season and SRP factor per episode. `scripts/12_model_mismatch.py` flies everything on test seeds 100–119 and compares against **345 classical designs** (3 families × ρ × position scale r_ref = 1000/100/10 km):
+
+| k | Holding: LQR ρ=1 | Bias-LQR ρ=1 | PPO (3 seeds) | DR-PPO (5 seeds) | PPO × best classical | DR-PPO × best classical |
+| --- | --- | --- | --- | --- | --- | --- |
+| 0 | 0.09 m/s (0.5 km) | 0.04 (0.6) | 0.11 (0.6) | 0.18 (7.9) | 1.99 ± 0.96 | 5.92 ± 1.87 |
+| 0.5 | 1.28 (29) | 0.88 (9.2) | 1.12 (11) | 1.04 (2.1) | 1.31 ± 0.02 | 1.10 ± 0.03 |
+| 1 | 2.55 (58) | 1.75 (18) | 2.20 (22) | 2.02 (1.4) | 1.26 ± 0.02 | 1.06 ± 0.02 |
+| 2 | 5.10 (117) | 3.50 (37) | 4.40 (48) | 3.95 (0.9) | 1.28 ± 0.05 | 1.03 ± 0.01 |
+| 4 | 10.26 (234) | 7.00 (74) | 8.99 (118) | 7.80 (1.9) | 1.34 ± 0.07 | 1.02 ± 0.01 |
+
+"× best classical" = model Δv ÷ Δv of the cheapest classical design (any family, ρ, r_ref) that is at least as accurate. Recovery from 1,000 km and every per-seed number: `experiments/model_mismatch.csv`.
+
+- **Eccentricity barely matters, SRP does.** Flown separately, e = 0.067 (k = 4) leaves LQR's holding cost at 0.085 m/s, unchanged from nominal: in pulsating coordinates L1 is still an equilibrium and the eccentricity only scales forces proportional to the distance from it (a few km here; it would matter for 10⁵ km halo orbits). All the change comes from SRP (`experiments/model_mismatch_parts.csv`).
+- **The LQR trade-off turns around.** Under SRP, looser LQR gains drift *away* from the Sun, where L1's instability adds to the load, so they are both farther and more expensive. Bias-LQR parks on the sunward side instead (k = 1: 0.40 m/s at 222 km).
+- **Nominal PPO** (never trained on SRP) loses no runs but needs 1.23–1.42× the best classical fuel while holding and 1.30–3.92× in recovery.
+- **DR-PPO** holds L1 to 0.8–3.0 km at every k > 0, tighter than any ρ = 1 classical design, at 1.01–1.13× the best classical fuel (1.06–1.48× in recovery). But near L1 every controller has to pay the SRP cancellation cost, which pushes all ratios towards 1; in absolute terms DR-PPO still spends 0.06–0.24 m/s per year more. **All 80 RL test cases are dominated** by a classical design that is both cheaper and at least as accurate (73 of them by a Bias-LQR).
+- **A near-miss worth reporting.** With only the r_ref = 1000 km designs, DR-PPO at k = 4 looked more accurate than every classical controller. That came from tuning the classical side too narrowly; a tighter position scale removes it.
+- **Robustness has a price.** At k = 0, DR-PPO needs 5.9× the best classical fuel and holds 9.7 km sunward of L1. Without memory it cannot tell whether SRP is present, so it thrusts as if an average SRP were acting. Bias-LQR's Kalman filter solves exactly this; an RL agent with memory (frame stacking or LSTM) is the natural next step.
+
+![Fuel/accuracy under model mismatch](figures/model_mismatch_pareto.png)
+
+![Controllers vs mismatch severity](figures/model_mismatch.png)
+
+Explanatory notes in Turkish (equations, design choices, which line does what): [`docs/faz7_notlar.md`](docs/faz7_notlar.md).
+
 **Current simplifications.** The spacecraft holds the L1 point itself; real missions fly halo or Lissajous orbits around it (to keep the Sun out of the antenna beam). Motion is planar, and thrust is a low, continuous push updated daily rather than impulsive burns weeks apart. These are deliberate, so LQR and RL are compared on identical, controlled conditions.
 
 ## The model
@@ -145,11 +178,11 @@ git clone https://github.com/eeymens/l1-station-keeping.git
 cd l1-station-keeping
 make install        # pip install -e ".[dev,rl]"  (CPU-only PyTorch is enough)
 make test           # pytest, 36 tests
-make reproduce      # every figure, CSV and paper number from the trained models (~10 min)
+make reproduce      # every figure, CSV and paper number from the trained models (~1.5 h, mostly the phase-7 classical sweeps)
 make paper          # paper/main.pdf (needs LaTeX)
 ```
 
-`make reproduce` evaluates the trained agents in `models/`; it does not retrain them. Re-running it on the committed models reproduces the CSVs in `experiments/` exactly. `make train` retrains all eight agents from scratch (~2 h on one core); PyTorch's nondeterminism across machines means retrained agents will differ slightly from the committed ones. `make -n <target>` prints the individual commands, one script per figure:
+`make reproduce` evaluates the trained agents in `models/`; it does not retrain them. Re-running it on the committed models reproduces the CSVs in `experiments/` exactly. `make train` retrains all thirteen agents from scratch (~4.5 h on one core); PyTorch's nondeterminism across machines means retrained agents will differ slightly from the committed ones. `make -n <target>` prints the individual commands, one script per figure:
 
 | Script | Output |
 | --- | --- |
@@ -163,6 +196,7 @@ make paper          # paper/main.pdf (needs LaTeX)
 | `08_train_ppo.py` | `models/ppo_*`, training log and learning curve |
 | `09_robustness.py` | `experiments/robustness*.csv`, `figures/robustness*.png` |
 | `10_seed_study.py` | `experiments/seed_study*.csv`, `figures/seed_study.png` |
+| `12_model_mismatch.py` | `experiments/model_mismatch*.csv`, `figures/model_mismatch*.png` (phase 7) |
 | `11_paper_assets.py` | `paper/generated/` — every number and table in the paper |
 
 Package versions verified to reproduce the committed results: [`requirements-lock.txt`](requirements-lock.txt).
@@ -190,6 +224,8 @@ src/cr3bp/
   control/
     station_keeping.py   simulator: daily thrust, navigation/thrust errors, delta-v log
     lqr.py               ZOH discretisation, discrete Riccati, LQR controller
+    lqi.py               phase 7: LQI and Kalman bias-estimating LQR
+  perturbations.py       phase 7: elliptic Earth orbit (pulsating coords) + solar radiation pressure
   envs/l1_env.py         gymnasium environment (discrete or continuous thrust)
   evaluation.py          common test protocol: same scenarios and seeds for every controller
   training.py            shared RL pieces: evaluation callback, model config, load_policy
@@ -197,6 +233,7 @@ models/            trained agents (best checkpoint of each run) + .json with env
 experiments/       raw CSV results
 scripts/           one script per figure
 tests/             pytest suite
+docs/              explanatory notes (phase 7, in Turkish)
 figures/           generated plots
 paper/             manuscript (main.tex, references.bib, generated/ numbers and tables)
 Makefile           install, test, reproduce, paper, train
