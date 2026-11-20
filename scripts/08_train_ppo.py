@@ -15,8 +15,17 @@ policy is kept. Test seeds (100-119) are untouched until scripts 07 and 09.
 Writes models/<name>.zip (+ .json), experiments/<name>_training.csv and
 figures/<name>_learning_curve.png.
 
+Phase 7 adds domain randomisation over the unmodelled physics (Earth's orbital
+eccentricity and solar radiation pressure, see cr3bp.perturbations):
+    --dr-k-max 4 --eval-ks 0,1,2,4
+draws a mismatch severity k ~ U(0, 4) every episode and selects the model on
+the mean score over k = 0, 1, 2, 4 (still on seeds 0-4 only). All PPO
+hyperparameters are unchanged.
+
 Run from the repository root:
     python scripts/08_train_ppo.py --steps 2000000 --name ppo_l1
+    python scripts/08_train_ppo.py --steps 3000000 --seed 0 --dr-k-max 4 \
+        --eval-ks 0,1,2,4 --name ppo_dr_s0
 """
 
 import argparse
@@ -46,12 +55,18 @@ def main():
     p.add_argument("--action-power", type=float, default=3.0)
     p.add_argument("--w-pos", type=float, default=0.3, help="distance weight in the reward")
     p.add_argument("--w-fuel", type=float, default=10.0, help="delta-v weight in the reward")
+    p.add_argument("--dr-k-max", type=float, default=0.0,
+                   help="phase 7: domain randomisation, k ~ U(0, dr_k_max) per episode")
+    p.add_argument("--eval-ks", default="0",
+                   help="phase 7: comma-separated mismatch severities for model selection")
     p.add_argument("--name", default="ppo_l1", help="output name for model, CSV and figure")
     args = p.parse_args()
     torch.set_num_threads(1)
 
     env_kwargs = {"action_type": "continuous", "action_power": args.action_power,
                   "w_pos": args.w_pos, "w_fuel": args.w_fuel}
+    if args.dr_k_max > 0:
+        env_kwargs["dr_k_max"] = args.dr_k_max
     env = make_vec_env(L1StationKeepingEnv, n_envs=args.n_envs, seed=args.seed,
                        env_kwargs=env_kwargs)
     (ROOT / "models").mkdir(exist_ok=True)
@@ -64,7 +79,8 @@ def main():
         policy_kwargs={"net_arch": {"pi": [128, 128], "vf": [128, 128]},
                        "log_std_init": args.log_std_init},
     )
-    cb = EvalCallback(L1StationKeepingEnv(**env_kwargs), args.eval_every, model_path)
+    eval_ks = tuple(float(k) for k in args.eval_ks.split(","))
+    cb = EvalCallback(L1StationKeepingEnv(**env_kwargs), args.eval_every, model_path, ks=eval_ks)
     t0 = time.time()
     model.learn(total_timesteps=args.steps, callback=cb)
     print(f"Training took {(time.time() - t0) / 60:.1f} min; best score {cb.best:.2f}")

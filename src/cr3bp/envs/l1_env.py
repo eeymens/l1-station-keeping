@@ -25,6 +25,13 @@ Reward per day
 
 Episodes start at a random offset (up to `max_offset_km`) with a small random
 velocity, and last `episode_days` days.
+
+Phase 7 options
+    perturbation_k  fixed model-mismatch severity (Earth's eccentricity and
+                    solar radiation pressure, see `cr3bp.perturbations`)
+    dr_k_max        domain randomisation: every episode draws k ~ U(0, dr_k_max),
+                    Earth's starting true anomaly ~ U(0, 2 pi) and an SRP
+                    area-to-mass factor ~ U(0.5, 1.5). 0 = off (phases 4-6).
 """
 
 import math
@@ -34,6 +41,7 @@ import numpy as np
 from gymnasium import spaces
 
 from ..control.station_keeping import KM, MPS, MPS2, NoiseModel, StationKeepingSim
+from ..perturbations import Perturbation
 
 THRUST_LEVELS_MPS2 = (1e-8, 1e-7, 1e-6)
 N_DIRECTIONS = 8
@@ -48,9 +56,12 @@ class L1StationKeepingEnv(gym.Env):
 
     def __init__(self, action_type="discrete", episode_days=365, max_offset_km=1000.0,
                  max_vel_mps=0.05, noise=None, w_pos=0.1, w_fuel=10.0, fail_penalty=100.0,
-                 u_max_mps2=THRUST_LEVELS_MPS2[-1], action_power=1.0, dt_days=1.0, seed=None):
+                 u_max_mps2=THRUST_LEVELS_MPS2[-1], action_power=1.0, dt_days=1.0, seed=None,
+                 perturbation_k=0.0, dr_k_max=0.0):
         super().__init__()
         self.sim = StationKeepingSim(dt_days=dt_days, noise=noise, seed=seed)
+        self.perturbation_k = float(perturbation_k)
+        self.dr_k_max = float(dr_k_max)
         self.action_type = action_type
         self.action_power = float(action_power)
         self.episode_steps = int(round(episode_days / dt_days))
@@ -112,6 +123,13 @@ class L1StationKeepingEnv(gym.Env):
             ang = rng.uniform(0, 2 * math.pi)
             offset = r * np.array([math.cos(ang), math.sin(ang)])
             vel = rng.normal(0.0, self.max_vel_mps / 2, 2)
+        if self.dr_k_max > 0.0:
+            self.sim.perturbation = Perturbation.from_k(
+                rng.uniform(0.0, self.dr_k_max), f0=rng.uniform(0.0, 2 * math.pi),
+                srp_scale=rng.uniform(0.5, 1.5))
+        elif self.perturbation_k > 0.0:
+            self.sim.perturbation = Perturbation.from_k(
+                self.perturbation_k, f0=rng.uniform(0.0, 2 * math.pi))
         self._obs_raw = self.sim.reset(offset, vel)
         self._steps = 0
         return self.features(self._obs_raw), {}

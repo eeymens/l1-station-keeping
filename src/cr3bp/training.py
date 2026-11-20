@@ -32,11 +32,15 @@ def score(summary):
 
 class EvalCallback(BaseCallback):
     """Every `every` environment steps, fly the greedy policy through the
-    standard evaluation (holding + acquisition, seeds 0-4) and keep the best."""
+    standard evaluation (holding + acquisition, seeds 0-4) and keep the best.
 
-    def __init__(self, eval_env, every, out_path):
+    ``ks`` (phase 7): mismatch severities to evaluate at; the score is the mean
+    over them. The default (0,) is the nominal CR3BP used in phases 4-6."""
+
+    def __init__(self, eval_env, every, out_path, ks=(0.0,)):
         super().__init__()
         self.eval_env, self.every, self.out_path = eval_env, every, out_path
+        self.ks = tuple(ks)
         self.best, self.log, self._next = -np.inf, [], every
 
     def _on_step(self):
@@ -46,9 +50,12 @@ class EvalCallback(BaseCallback):
         self._next += self.every
         ctrl = PolicyController(self.eval_env,
                                 lambda f: self.model.predict(f, deterministic=True)[0])
-        summ = summarize(evaluate(ctrl))
-        sc = score(summ)
+        summs = {k: summarize(evaluate(ctrl, perturbation_k=k)) for k in self.ks}
+        summ = summs[self.ks[0]]
+        sc = float(np.mean([score(s) for s in summs.values()]))
         row = {"step": self.num_timesteps, "score": sc}
+        if len(self.ks) > 1:
+            row.update({f"score_k{k:g}": score(s) for k, s in summs.items()})
         for name, m in summ.items():
             row.update({f"{name}_survival": m["survival"], f"{name}_days": m["days"],
                         f"{name}_dv_mps": m["dv_mps"], f"{name}_dist_km": m["mean_dist_km"]})
