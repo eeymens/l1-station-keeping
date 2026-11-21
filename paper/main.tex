@@ -52,8 +52,12 @@ $L_1$ about \mmDvGrowthKone-fold at realistic levels. PPO agents trained with
 domain randomisation hold $L_1$ under SRP more tightly than any default classical design
 and come within \mmDrHoldMin--\mmDrHoldMax$\times$ of the best of \mmDesigns\
 classical designs, but all \mmRlRuns\ RL test cases are still dominated once the
-classical side is allowed integral action or a disturbance estimator. Code and
-data are open source.
+classical side is allowed integral action or a disturbance estimator. Giving
+PPO a memory of past observations does not help, but residual RL on top of the
+disturbance-estimating LQR reaches the classical Pareto frontier: on 100 fresh
+seeds and after a dense search of the classical design space, no classical
+design dominates it, although its advantage is at most \peFsMarginMax\,\%.
+Code and data are open source.
 \end{abstract}
 
 % ===========================================================================
@@ -612,6 +616,81 @@ average SRP were acting: DR-PPO seed 0 holds \mmDrSunwardKzero~km sunward of
 $L_1$ when there is no SRP at all. Bias-LQR solves exactly this problem with a
 Kalman filter.
 
+\subsection{Giving RL the missing information: memory and residual learning}
+\label{sec:phase8}
+
+DR-PPO cannot tell how strong the SRP is, while the Bias-LQR that dominates it
+estimates exactly that. We therefore gave RL the same information in two ways,
+with the same hyperparameters, domain randomisation and model selection as
+DR-PPO (five training seeds each). \emph{MEM-PPO} sees the last ten navigation
+estimates and its own last ten actions. \emph{RES-PPO} is residual RL
+\cite{johannink2019,silver2018}: its thrust is added to that of a Bias-LQR
+($\rho = 1$), capped at the same $10^{-6}$~m/s$^2$, and it also observes the
+filter's state and force estimates and the base thrust. With a zero action it
+is exactly the Bias-LQR (a unit test checks this). Table~\ref{tab:phase8} uses
+the test seeds; the confirmation below uses fresh seeds.
+
+\begin{table}[t]
+\centering
+\caption{Memory and residual RL, test seeds 100--119: $\dv$ divided by that of
+the cheapest classical design (of \mmDesigns) that is at least as accurate,
+mean $\pm$ std over 5 training seeds, and the number of RES-PPO seeds that no
+classical design dominates.}
+\label{tab:phase8}
+\small
+\input{generated/tab_phase8}
+\end{table}
+
+\paragraph{Memory did not help.} MEM-PPO is worse than DR-PPO in
+\peMemWorseCases\ of \peMemCases\ $k$/scenario combinations and varies much more
+between training seeds (mean holding distance \peMemDistMin--\peMemDistMax~km
+under SRP). At $k = 0$ it spends \peMemHoldDvKzero~m/s while holding,
+\peMemHoldRatioKzero$\times$ the best classical fuel. Stacking past
+observations gives the network the information, but also ten times the
+navigation noise and a much larger input, and with our unchanged training
+budget it did not learn to use it. A recurrent policy or a longer budget might.
+
+\paragraph{Residual RL reaches the classical frontier.} RES-PPO is the first
+learned controller in this study that is not dominated. While holding at
+$k = 0.5$--2, \peResNondomCases\ of \peResNondomOf\ seed/severity cases have no
+classical design that is both cheaper and at least as accurate, and their
+$\dv$ lies \peResEnvMin--\peResEnvMax$\times$ the interpolated classical
+envelope. What the agent learned is visible in Fig.~\ref{fig:phase8}: it moves
+its base \emph{along} the frontier, towards tighter tracking. At $k = 1$ the
+Bias-LQR base holds \peBaseDistKone~km for \peBaseDvKone~m/s; with the residual
+the controller holds \peResDistKone~km for \peResDvKone~m/s, a point no
+classical design in our sweep reaches more cheaply. In recovery the residual
+costs fuel instead: \peResAcqMin--\peResAcqMax$\times$ the envelope, dominated in
+\peResAcqDom\ of \peResAcqOf\ cases.
+
+\paragraph{Confirmation on fresh seeds.} Margins below one per cent need
+care, so we re-tested the holding claim on 100 new seeds (200--299) against a
+denser grid of 1710 Bias-LQR and LQI designs ($r_\text{ref} \in \{1000, 300,
+100, 30, 10\}$~km $\times$ 57 values of $\rho$), with a paired bootstrap over
+the seeds. RES-PPO is not dominated in
+\the\numexpr\peConfCases-\peConfDominated\relax\ of \peConfCases\ cases and lies
+\peConfEnvMin--\peConfEnvMax$\times$ the envelope; the bootstrap intervals are
+narrow (\peConfLoMin--\peConfHiMax) because agent and designs fly identical
+seeds. Finally, because the envelope is very flat here, we searched the
+two-parameter Bias-LQR family densely around the agents (\peFsDesigns\ designs
+per severity at $k = 0.5$ and 1, including the earlier ones). None of them
+dominates any of the \peFsCases\ agents; \peFsBelow\ of the \peFsCases\ lie
+below the envelope, by at most \peFsMarginMax\,\%. \textbf{Residual RL
+therefore reaches the classical Pareto frontier while holding under SRP, but
+does not move it meaningfully}: the largest saving at equal accuracy is
+\peFsSaveMax~m/s per year. In practice the agent has learned to re-tune its
+classical base along the frontier rather than to discover a better control
+law.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{paper_phase8}
+\caption{Memory (MEM-PPO) and residual RL (RES-PPO, on a Bias-LQR base
+$\times$) against the classical envelopes, test seeds. RES-PPO slides its base
+along the Bias-LQR frontier; MEM-PPO scatters above it.}
+\label{fig:phase8}
+\end{figure}
+
 % ===========================================================================
 \section{Discussion}
 
@@ -650,7 +729,13 @@ is decades old and only a few lines of code, and with it the classical
 controllers stay Pareto-optimal. The setting in which we would expect RL to
 gain is one where the missing physics cannot be summarised as a slowly
 varying bias, or where it can only be inferred from a history of
-observations. That calls for a recurrent or history-based policy.
+observations. That calls for a recurrent or history-based policy. Phase~8 tested the simplest version of that idea and it
+failed (Section~\ref{sec:phase8}); what worked was to keep the classical
+estimator and let RL correct its output. The residual agent matches the
+classical frontier, which is a useful practical result (a learned correction
+on a trusted classical controller is easy to certify, since a zero action
+recovers the classical one), but it is not evidence that RL beats classical
+control here.
 
 \paragraph{Limitations.}
 \label{sec:limits}
@@ -681,10 +766,12 @@ controllers do not model, is added, plain LQR degrades and a domain-randomised
 PPO agent comes within \mmDrHoldMin--\mmDrHoldMax$\times$ of the best classical
 fuel. Classical controllers with integral action or a disturbance estimator
 still dominate it, and Earth's eccentricity has almost no effect on holding the
-point. Natural next steps are halo-orbit
-station-keeping in three dimensions (where the eccentricity matters), RL
-policies with memory that can infer unmodelled forces, and hybrid designs in which a learned policy corrects a linear
-controller only where the linearisation fails.
+point. A residual PPO correction on that estimator reaches, but does not
+meaningfully move, the classical frontier. Natural next steps are halo-orbit
+station-keeping in three dimensions (where the eccentricity matters), recurrent
+RL policies that can infer unmodelled forces, and residual RL in settings where
+the linearisation itself fails, such as large halo orbits, where a learned
+correction has more to add.
 
 \section*{Reproducibility}
 All code, trained models and raw results are available at

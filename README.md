@@ -8,6 +8,8 @@ The Sun–Earth L1 point sits about 1.49 million km sunward of Earth. It is an e
 
 **Phase 7: what if the real physics differs from the model?** With solar radiation pressure (SRP) and Earth's elliptic orbit added to the simulator only, plain LQR degrades (≈30× the nominal fuel at realistic SRP) and PPO trained with domain randomisation gets within 1.01–1.13× of the best classical fuel while holding L1 to 0.8–3 km. But once the classical side gets its textbook fixes (integral action, a Kalman disturbance estimator), all 80 RL test cases are still dominated. The eccentricity alone has almost no effect; SRP is what matters.
 
+**Phase 8: give RL the missing information.** A memory of the last 10 observations makes PPO *worse*. A residual PPO correction on top of the Kalman bias-estimating LQR is the first learned controller that is **not dominated**: on 100 fresh seeds and after a dense search of 1,011 classical designs per severity, no classical design beats it while holding under SRP. Its edge is at most 0.6 % (≤ 0.01 m/s per year), though, so RL *reaches* the classical frontier rather than moving it.
+
 📄 **Paper draft:** [`paper/main.pdf`](paper/main.pdf) · **Reproduce everything:** `make reproduce` (see [Reproducing the results](#reproducing-the-results))
 
 ![Uncontrolled drift away from L1](figures/l1_escape.png)
@@ -25,6 +27,7 @@ The Sun–Earth L1 point sits about 1.49 million km sunward of Earth. It is an e
 | 5 | PPO agent, comparison experiments (Δv, tracking error, robustness), 3 training seeds | Done |
 | 6 | Paper draft (numbers generated from the CSVs), one-command reproduction, CI | Done |
 | 7 | Model mismatch: elliptic Earth orbit + solar radiation pressure, LQI and Kalman bias-estimating LQR, domain-randomised PPO (5 seeds) | Done |
+| 8 | RL with memory and residual RL on Bias-LQR (5 seeds each), confirmation on fresh seeds and a dense classical frontier search | Done |
 
 ## Results
 
@@ -153,6 +156,32 @@ A severity k scales both (e = k × 0.0167, SRP × k; k = 1 realistic, k = 4 four
 
 Explanatory notes in Turkish (equations, design choices, which line does what): [`docs/faz7_notlar.md`](docs/faz7_notlar.md).
 
+**Memory and residual RL (phase 8).** DR-PPO cannot tell how strong the SRP is; Bias-LQR, which dominates it, estimates exactly that. Two ways to give RL the same information, trained exactly like DR-PPO (same hyperparameters and domain randomisation, 5 training seeds each):
+
+- **MEM-PPO**: the observation holds the last 10 navigation estimates and the last 10 actions (`--history 10`).
+- **RES-PPO** (residual RL): thrust = Bias-LQR (ρ = 1) + agent, capped at 10⁻⁶ m/s², and the agent also sees the filter's state and force estimates and the base thrust (`--residual-rho 1`). With a zero action it *is* the Bias-LQR (unit-tested). Writing that test caught a real bug: the filter has to be told the total thrust actually applied, not only its own.
+
+`scripts/13_memory_residual.py` (test seeds 100–119, Δv ÷ cheapest classical design at least as accurate, mean ± std over 5 seeds):
+
+| k | Holding: DR-PPO | MEM-PPO | RES-PPO | RES-PPO seeds not dominated |
+| --- | --- | --- | --- | --- |
+| 0 | 5.92 ± 1.87 | 12.20 ± 5.10 | 0.987 ± 0.093 | 3/5 |
+| 0.5 | 1.095 ± 0.029 | 1.332 ± 0.200 | 0.990 ± 0.005 | 5/5 |
+| 1 | 1.057 ± 0.016 | 1.151 ± 0.104 | 0.994 ± 0.001 | 5/5 |
+| 2 | 1.028 ± 0.009 | 1.071 ± 0.056 | 0.996 ± 0.003 | 5/5 |
+| 4 | 1.017 ± 0.008 | 1.045 ± 0.017 | 0.999 ± 0.003 | 3/5 |
+
+- **Memory did not help.** MEM-PPO is worse than DR-PPO in all 10 k/scenario combinations and much less consistent across seeds. Stacked observations carry the information but also 10× the navigation noise; with the unchanged training budget the network did not learn to use it.
+- **Residual RL reaches the frontier.** RES-PPO slides its base *along* the Bias-LQR frontier towards tighter tracking (k = 1: base 18 km / 1.75 m/s → 6.4 km / 1.87 m/s). In recovery it is dominated in all 25 cases (1.03–1.07× the envelope).
+- **Confirmation** (`scripts/14_confirmation.py`): 100 fresh seeds (200–299), 1,710 Bias-LQR and LQI designs (r_ref = 1000/300/100/30/10 km × 57 ρ), paired bootstrap. RES-PPO is not dominated in 13 of 15 holding cases, at 0.994–1.001× the envelope.
+- **Dense frontier search** (`scripts/15_frontier_search.py`): because the envelope is very flat, Bias-LQR's two tuning parameters were searched on a 21 × 21 grid around the agents (1,011 designs per severity in total). **None dominates any of the 10 agents; 9 of 10 lie below the envelope, by at most 0.6 % (≤ 0.010 m/s per year).**
+
+So residual RL *matches* the best classical controller while holding under SRP, with a margin too small to matter physically. It learned to re-tune its classical base along the frontier, not a better control law. A practical upside: a zero action recovers the trusted classical controller.
+
+![Memory and residual RL vs the classical envelopes](figures/phase8_pareto.png)
+
+Turkish notes: [`docs/faz8_notlar.md`](docs/faz8_notlar.md). Raw results: `experiments/phase8.csv`, `experiments/confirmation*.csv`, `experiments/frontier_search*.csv`.
+
 **Current simplifications.** The spacecraft holds the L1 point itself; real missions fly halo or Lissajous orbits around it (to keep the Sun out of the antenna beam). Motion is planar, and thrust is a low, continuous push updated daily rather than impulsive burns weeks apart. These are deliberate, so LQR and RL are compared on identical, controlled conditions.
 
 ## The model
@@ -178,11 +207,11 @@ git clone https://github.com/eeymens/l1-station-keeping.git
 cd l1-station-keeping
 make install        # pip install -e ".[dev,rl]"  (CPU-only PyTorch is enough)
 make test           # pytest, 36 tests
-make reproduce      # every figure, CSV and paper number from the trained models (~1.5 h, mostly the phase-7 classical sweeps)
+make reproduce      # every figure, CSV and paper number from the trained models (~4 h on two cores, mostly the phase-7/8 classical sweeps)
 make paper          # paper/main.pdf (needs LaTeX)
 ```
 
-`make reproduce` evaluates the trained agents in `models/`; it does not retrain them. Re-running it on the committed models reproduces the CSVs in `experiments/` exactly. `make train` retrains all thirteen agents from scratch (~4.5 h on one core); PyTorch's nondeterminism across machines means retrained agents will differ slightly from the committed ones. `make -n <target>` prints the individual commands, one script per figure:
+`make reproduce` evaluates the trained agents in `models/`; it does not retrain them. Re-running it on the committed models reproduces the CSVs in `experiments/` exactly. `make train` retrains all 23 agents from scratch (~8 h on one core); PyTorch's nondeterminism across machines means retrained agents will differ slightly from the committed ones. `make -n <target>` prints the individual commands, one script per figure:
 
 | Script | Output |
 | --- | --- |
@@ -197,6 +226,9 @@ make paper          # paper/main.pdf (needs LaTeX)
 | `09_robustness.py` | `experiments/robustness*.csv`, `figures/robustness*.png` |
 | `10_seed_study.py` | `experiments/seed_study*.csv`, `figures/seed_study.png` |
 | `12_model_mismatch.py` | `experiments/model_mismatch*.csv`, `figures/model_mismatch*.png` (phase 7) |
+| `13_memory_residual.py` | `experiments/phase8.csv`, `figures/phase8_pareto.png` (phase 8) |
+| `14_confirmation.py` | `experiments/confirmation*.csv` (phase 8, seeds 200–299) |
+| `15_frontier_search.py` | `experiments/frontier_search*.csv` (phase 8, dense classical search) |
 | `11_paper_assets.py` | `paper/generated/` — every number and table in the paper |
 
 Package versions verified to reproduce the committed results: [`requirements-lock.txt`](requirements-lock.txt).
@@ -233,7 +265,7 @@ models/            trained agents (best checkpoint of each run) + .json with env
 experiments/       raw CSV results
 scripts/           one script per figure
 tests/             pytest suite
-docs/              explanatory notes (phase 7, in Turkish)
+docs/              explanatory notes (phases 7 and 8, in Turkish)
 figures/           generated plots
 paper/             manuscript (main.tex, references.bib, generated/ numbers and tables)
 Makefile           install, test, reproduce, paper, train

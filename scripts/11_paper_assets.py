@@ -1,7 +1,7 @@
 """Phase 6: every number and table in the paper, generated from the results.
 
 Nothing in paper/main.tex is typed by hand: this script reads the raw CSVs in
-experiments/ (written by scripts 05, 07, 09, 10 and 12), recomputes the few
+experiments/ (written by scripts 05, 07, 09, 10, 12, 13 and 14), recomputes the few
 quantities that need a simulation (thrust statistics, the unstable mode's pull,
 the Lagrange-point table), and writes
 
@@ -741,6 +741,93 @@ def figures():
     plt.close(fig)
 
 
+# ---------------------------------------------------------------- 8. memory and residual RL
+def phase8():
+    """Phase 8 (scripts/13 and 14): RL with memory and residual RL on Bias-LQR."""
+    rows = load("phase8.csv")
+    conf = load("confirmation.csv")
+    f = lambda r, k: float(r[k])  # noqa: E731
+    seeds = lambda fam, k, scen: [r for r in rows if r["family"] == fam  # noqa: E731
+                                  and float(r["k"]) == k and r["scenario"] == scen
+                                  and r["train_seed"] not in ("mean", "std", "-1")]
+    one = lambda fam, k, scen, st: next(r for r in rows if r["family"] == fam  # noqa: E731
+                                        and float(r["k"]) == k and r["scenario"] == scen
+                                        and r["train_seed"] == st)
+    pert = (0.5, 1.0, 2.0, 4.0)
+    # memory
+    mem_vs_dr = [f(one("MEM-PPO", k, s, "mean"), "best_classical_ratio")
+                 / f(one("DR-PPO", k, s, "mean"), "best_classical_ratio")
+                 for k in (0.0, *pert) for s in ("holding", "acquisition")]
+    macro("peMemWorseCases", str(sum(v > 1 for v in mem_vs_dr)))
+    macro("peMemCases", str(len(mem_vs_dr)))
+    m0 = one("MEM-PPO", 0.0, "holding", "mean")
+    macro("peMemHoldDvKzero", num(f(m0, "dv_mps"), 2))
+    macro("peMemHoldRatioKzero", num(f(m0, "best_classical_ratio"), 1))
+    d = [f(r, "mean_dist_km") for k in pert for r in seeds("MEM-PPO", k, "holding")]
+    macro("peMemDistMin", num(min(d), 1))
+    macro("peMemDistMax", f"{max(d):.0f}")
+    # residual
+    nd = [r for k in (0.5, 1.0, 2.0) for r in seeds("RES-PPO", k, "holding")]
+    macro("peResNondomCases", str(sum(f(r, "dominated") == 0 for r in nd)))
+    macro("peResNondomOf", str(len(nd)))
+    env = [f(one("RES-PPO", k, "holding", "mean"), "envelope_ratio") for k in (0.5, 1.0, 2.0)]
+    macro("peResEnvMin", f"{min(env):.3f}")
+    macro("peResEnvMax", f"{max(env):.3f}")
+    acq = [f(r, "envelope_ratio") for k in (0.0, *pert) for r in seeds("RES-PPO", k, "acquisition")]
+    macro("peResAcqMin", num(min(acq), 2))
+    macro("peResAcqMax", num(max(acq), 2))
+    macro("peResAcqDom", str(sum(f(r, "dominated") == 1 for k in (0.0, *pert)
+                                 for r in seeds("RES-PPO", k, "acquisition"))))
+    macro("peResAcqOf", str(len(acq)))
+    b1, r1 = one("RES base", 1.0, "holding", "-1"), one("RES-PPO", 1.0, "holding", "mean")
+    macro("peBaseDistKone", f"{f(b1, 'mean_dist_km'):.0f}")
+    macro("peBaseDvKone", num(f(b1, "dv_mps"), 2))
+    macro("peResDistKone", num(f(r1, "mean_dist_km"), 1))
+    macro("peResDvKone", num(f(r1, "dv_mps"), 2))
+    # confirmation (seeds 200-299)
+    macro("peConfEnvMin", f"{min(f(r, 'envelope_ratio') for r in conf):.3f}")
+    macro("peConfEnvMax", f"{max(f(r, 'envelope_ratio') for r in conf):.3f}")
+    macro("peConfLoMin", f"{min(f(r, 'ci_low') for r in conf):.3f}")
+    macro("peConfHiMax", f"{max(f(r, 'ci_high') for r in conf):.3f}")
+    macro("peConfDominated", str(sum(f(r, "dominated") == 1 for r in conf)))
+    macro("peConfCases", str(len(conf)))
+    macro("peConfBelow", str(sum(f(r, "ci_high") < 1.0 for r in conf)))
+    macro("peConfAbove", str(sum(f(r, "ci_low") > 1.0 for r in conf)))
+    fs = load("frontier_search.csv")
+    macro("peFsDesigns", str(int(float(fs[0]["n_designs"]))))
+    macro("peFsCases", str(len(fs)))
+    macro("peFsDominated", str(sum(f(r, "dominated") == 1 for r in fs)))
+    macro("peFsBelow", str(sum(f(r, "envelope_ratio") < 1 for r in fs)))
+    macro("peFsEnvMin", f"{min(f(r, 'envelope_ratio') for r in fs):.4f}")
+    macro("peFsEnvMax", f"{max(f(r, 'envelope_ratio') for r in fs):.4f}")
+    macro("peFsMarginMax", f"{100 * (1 - min(f(r, 'envelope_ratio') for r in fs)):.1f}")
+    macro("peFsSaveMax", f"{max((1 - f(r, 'envelope_ratio')) * f(r, 'dv_mps') for r in fs):.3f}")
+
+    lines = []
+    for scen, title in (("holding", "Holding"), ("acquisition", "Recovery")):
+        lines.append(rf"\multicolumn{{5}}{{l}}{{\emph{{{title}}}}} \\")
+        for k in (0.0, *pert):
+            cells = []
+            for fam in ("DR-PPO", "MEM-PPO", "RES-PPO"):
+                m, sd = one(fam, k, scen, "mean"), one(fam, k, scen, "std")
+                cells.append(rf"${f(m, 'best_classical_ratio'):.3f} \pm "
+                             rf"{f(sd, 'best_classical_ratio'):.3f}$")
+            dom = sum(f(r, "dominated") == 0 for r in seeds("RES-PPO", k, scen))
+            lines.append(rf"{k:g} & " + " & ".join(cells) + rf" & {dom}/5 \\")
+        if scen == "holding":
+            lines.append(r"\addlinespace")
+    write_table("tab_phase8.tex", r"""
+\begin{tabular}{lcccc}
+\toprule
+ & \multicolumn{3}{c}{$\dv$ $\times$ best classical at same accuracy} & RES-PPO seeds \\
+\cmidrule(lr){2-4}
+$k$ & DR-PPO & MEM-PPO & RES-PPO & not dominated \\
+\midrule
+""" + "\n".join(lines) + r"""
+\bottomrule
+\end{tabular}""")
+
+
 def mismatch_figure():
     """Compact fuel/accuracy plane at k = 0, 1, 4 for the paper (from the CSVs)."""
     plt = _style()
@@ -787,10 +874,61 @@ def mismatch_figure():
     plt.close(fig)
 
 
+def phase8_figure():
+    """Paper figure for phase 8: envelopes, RES base, DR/MEM/RES agents (from the CSVs)."""
+    plt = _style()
+    cls = load("model_mismatch_classical.csv")
+    rows = load("phase8.csv")
+    col = {"LQR": "#2471a3", "LQI": "#1e8449", "Bias-LQR": "#5d6d7e", "DR-PPO": "#c0392b",
+           "MEM-PPO": "#8e44ad", "RES-PPO": "#16a085"}
+    fig, axes = plt.subplots(2, 3, figsize=(6.3, 4.3))
+    for i, scen in enumerate(("holding", "acquisition")):
+        for j, k in enumerate((0.0, 1.0, 4.0)):
+            ax = axes[i, j]
+            for fam in ("LQR", "LQI", "Bias-LQR"):
+                pts = sorted(((float(c["mean_dist_km"]), float(c["dv_mps"])) for c in cls
+                              if float(c["k"]) == k and c["scenario"] == scen
+                              and c["family"] == fam and float(c["survival"]) == 1.0))
+                env, best = [], float("inf")
+                for d, v in pts:
+                    if v < best:
+                        env.append((d, v))
+                        best = v
+                ax.plot(*zip(*env), "-", color=col[fam], lw=1.1, label=fam)
+            b = next(r for r in rows if r["family"] == "RES base" and float(r["k"]) == k
+                     and r["scenario"] == scen)
+            ax.plot(float(b["mean_dist_km"]), float(b["dv_mps"]), "x", color="black", ms=5,
+                    mew=1.2, label="RES base")
+            for fam, mk in (("DR-PPO", "^"), ("MEM-PPO", "s"), ("RES-PPO", "o")):
+                sel = [r for r in rows if r["family"] == fam and float(r["k"]) == k
+                       and r["scenario"] == scen and r["train_seed"] not in ("mean", "std")]
+                ax.plot([float(r["mean_dist_km"]) for r in sel],
+                        [float(r["dv_mps"]) for r in sel], mk, color=col[fam], ms=3.2,
+                        mec="white", mew=0.3, label=fam)
+            ax.set_xscale("log")
+            ax.set_yscale("log")
+            _plain_log(ax)
+            ax.set_title(f"({'abc'[j] if i == 0 else 'def'[j]}) "
+                         f"{'Holding' if scen == 'holding' else 'Recovery'}, $k = {k:g}$",
+                         loc="left")
+            ax.grid(True, which="major", color="#e6e6e6", lw=0.5)
+            ax.set_axisbelow(True)
+            if j == 0:
+                ax.set_ylabel(r"$\Delta v$ per year [m/s]")
+            if i == 1:
+                ax.set_xlabel("mean distance [km]")
+    h, lab = axes[0, 0].get_legend_handles_labels()
+    fig.legend(h, lab, loc="lower center", ncol=7, frameon=False, bbox_to_anchor=(0.5, -0.01),
+               columnspacing=0.9, handletextpad=0.3)
+    fig.tight_layout(rect=(0, 0.05, 1, 1), w_pad=0.8, h_pad=0.8)
+    fig.savefig(ROOT / "figures" / "paper_phase8.pdf")
+    plt.close(fig)
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     for step in (dynamics, lqr_phase3, comparison, ratios, robustness, thrust_logs,
-                 hyperparameters, mismatch, figures, mismatch_figure):
+                 hyperparameters, mismatch, phase8, figures, mismatch_figure, phase8_figure):
         step()
         print(f"{step.__name__} done", flush=True)
     text = "% Generated by scripts/11_paper_assets.py -- do not edit by hand.\n"

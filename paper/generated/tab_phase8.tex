@@ -1,0 +1,21 @@
+\begin{tabular}{lcccc}
+\toprule
+ & \multicolumn{3}{c}{$\dv$ $\times$ best classical at same accuracy} & RES-PPO seeds \\
+\cmidrule(lr){2-4}
+$k$ & DR-PPO & MEM-PPO & RES-PPO & not dominated \\
+\midrule
+\multicolumn{5}{l}{\emph{Holding}} \\
+0 & $5.919 \pm 1.874$ & $12.204 \pm 5.103$ & $0.987 \pm 0.093$ & 3/5 \\
+0.5 & $1.095 \pm 0.029$ & $1.332 \pm 0.200$ & $0.990 \pm 0.005$ & 5/5 \\
+1 & $1.057 \pm 0.016$ & $1.151 \pm 0.104$ & $0.994 \pm 0.001$ & 5/5 \\
+2 & $1.028 \pm 0.009$ & $1.071 \pm 0.056$ & $0.996 \pm 0.003$ & 5/5 \\
+4 & $1.017 \pm 0.008$ & $1.045 \pm 0.017$ & $0.999 \pm 0.003$ & 3/5 \\
+\addlinespace
+\multicolumn{5}{l}{\emph{Recovery}} \\
+0 & $1.678 \pm 0.164$ & $1.977 \pm 0.297$ & $1.040 \pm 0.012$ & 0/5 \\
+0.5 & $1.355 \pm 0.075$ & $1.589 \pm 0.125$ & $1.037 \pm 0.004$ & 0/5 \\
+1 & $1.245 \pm 0.050$ & $1.465 \pm 0.162$ & $1.040 \pm 0.005$ & 0/5 \\
+2 & $1.124 \pm 0.027$ & $1.306 \pm 0.173$ & $1.066 \pm 0.003$ & 0/5 \\
+4 & $1.084 \pm 0.017$ & $1.249 \pm 0.137$ & $1.035 \pm 0.004$ & 0/5 \\
+\bottomrule
+\end{tabular}
