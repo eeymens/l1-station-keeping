@@ -3,10 +3,10 @@
 #   make install     install the package with all extras
 #   make test        run the test suite
 #   make reproduce   regenerate every figure, CSV and paper number from the
-#                    trained models in models/ (~1.5 h on one core, most of it
-#                    the phase-7 classical sweeps)
+#                    trained models in models/ (~3 h on one core, most of it
+#                    the phase-7 and phase-8 classical sweeps)
 #   make paper       build paper/main.pdf (needs a LaTeX distribution)
-#   make train       retrain every RL agent from scratch (~4.5 h on one core;
+#   make train       retrain every RL agent from scratch (~8 h on one core;
 #                    results will differ slightly from the committed models)
 #
 # Run `make -n <target>` to see the commands without running them.
@@ -14,7 +14,7 @@
 PYTHON ?= python
 S := scripts
 
-.PHONY: install test reproduce figures lqr evaluate mismatch paper-assets paper train clean-paper
+.PHONY: install test reproduce figures lqr evaluate mismatch phase8 paper-assets paper train clean-paper
 
 install:
 	$(PYTHON) -m pip install -e ".[dev,rl]"
@@ -22,7 +22,7 @@ install:
 test:
 	$(PYTHON) -m pytest -q
 
-reproduce: test figures lqr evaluate mismatch paper-assets
+reproduce: test figures lqr evaluate mismatch phase8 paper-assets
 
 # Phases 1-2: dynamics, Lagrange points, uncontrolled escape (seconds)
 figures:
@@ -47,6 +47,12 @@ evaluate:
 # Phase 7: model mismatch (elliptic Earth orbit + solar radiation pressure)
 mismatch:
 	$(PYTHON) $(S)/12_model_mismatch.py
+
+# Phase 8: RL with memory, residual RL on Bias-LQR, confirmation on fresh seeds
+phase8:
+	$(PYTHON) $(S)/13_memory_residual.py
+	$(PYTHON) $(S)/14_confirmation.py
+	$(PYTHON) $(S)/15_frontier_search.py
 
 # Phase 6: every number and table in the paper, from experiments/*.csv
 paper-assets:
@@ -73,4 +79,8 @@ train:
 	for seed in 0 1 2 3 4; do \
 		$(PYTHON) $(S)/08_train_ppo.py --steps 3000000 --seed $$seed --dr-k-max 4 \
 			--eval-ks 0,1,2,4 --name ppo_dr_s$$seed; \
+		$(PYTHON) $(S)/08_train_ppo.py --steps 3000000 --seed $$seed --dr-k-max 4 \
+			--eval-ks 0,1,2,4 --history 10 --name ppo_mem_s$$seed; \
+		$(PYTHON) $(S)/08_train_ppo.py --steps 3000000 --seed $$seed --dr-k-max 4 \
+			--eval-ks 0,1,2,4 --residual-rho 1 --name ppo_res_s$$seed; \
 	done
