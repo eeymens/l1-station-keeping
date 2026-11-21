@@ -26,6 +26,11 @@ Run from the repository root:
     python scripts/08_train_ppo.py --steps 2000000 --name ppo_l1
     python scripts/08_train_ppo.py --steps 3000000 --seed 0 --dr-k-max 4 \
         --eval-ks 0,1,2,4 --name ppo_dr_s0
+
+Phase 8 (same hyperparameters, same domain randomisation):
+    --history 10          memory: last 10 observations and actions (ppo_mem_s*)
+    --residual-rho 1      hybrid: correction on top of Bias-LQR (rho = 1), which
+                          also passes its Kalman estimates to the agent (ppo_res_s*)
 """
 
 import argparse
@@ -59,6 +64,10 @@ def main():
                    help="phase 7: domain randomisation, k ~ U(0, dr_k_max) per episode")
     p.add_argument("--eval-ks", default="0",
                    help="phase 7: comma-separated mismatch severities for model selection")
+    p.add_argument("--history", type=int, default=1,
+                   help="phase 8: observation holds the last N feature vectors and actions")
+    p.add_argument("--residual-rho", type=float, default=None,
+                   help="phase 8: agent adds a correction to a Bias-LQR with this rho")
     p.add_argument("--name", default="ppo_l1", help="output name for model, CSV and figure")
     args = p.parse_args()
     torch.set_num_threads(1)
@@ -67,6 +76,10 @@ def main():
                   "w_pos": args.w_pos, "w_fuel": args.w_fuel}
     if args.dr_k_max > 0:
         env_kwargs["dr_k_max"] = args.dr_k_max
+    if args.history > 1:
+        env_kwargs["history_len"] = args.history
+    if args.residual_rho is not None:
+        env_kwargs["residual"] = {"rho": args.residual_rho}
     env = make_vec_env(L1StationKeepingEnv, n_envs=args.n_envs, seed=args.seed,
                        env_kwargs=env_kwargs)
     (ROOT / "models").mkdir(exist_ok=True)

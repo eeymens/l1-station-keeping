@@ -32,6 +32,18 @@ Phase 7 options
     dr_k_max        domain randomisation: every episode draws k ~ U(0, dr_k_max),
                     Earth's starting true anomaly ~ U(0, 2 pi) and an SRP
                     area-to-mass factor ~ U(0.5, 1.5). 0 = off (phases 4-6).
+
+Phase 8 options (both default to the phase 4-7 behaviour)
+    history_len     the observation also contains the previous history_len - 1
+                    feature vectors and the last history_len actions, so a
+                    feed-forward policy can infer slowly varying forces (memory).
+    residual        dict of `BiasLQRController` settings: the thrust is
+                    u = u_BiasLQR + u_agent (norm capped at u_max), and the
+                    observation adds the filter's state estimate, its force
+                    estimate and the base thrust (hybrid "residual RL").
+
+The observation is assembled by an `ObsBuilder`, which `PolicyController`
+shares, so an agent is flown exactly as it was trained.
 """
 
 import math
@@ -40,6 +52,7 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
+from ..control.lqi import BiasLQRController
 from ..control.station_keeping import KM, MPS, MPS2, NoiseModel, StationKeepingSim
 from ..perturbations import Perturbation
 
@@ -51,14 +64,77 @@ def symlog(x):
     return np.sign(x) * np.log10(1.0 + np.abs(x))
 
 
+#: Scale for thrust-like observation entries (phase 8), m/s^2.
+U_OBS_SCALE_MPS2 = 1e-7
+
+
+class ObsBuilder:
+    """Turns noisy navigation estimates into observations and actions into thrust.
+
+    Stateless for the phase 4-7 agents (features of the current estimate only).
+    With history (phase 8) it keeps the last feature vectors and actions; with
+    a residual base it runs a `BiasLQRController` alongside the agent.
+    """
+
+    def __init__(self, env):
+        self.env = env
+        self.h = env.history_len
+        self.base = (BiasLQRController(**env.residual) if env.residual is not None else None)
+        self.n_act = int(np.prod(env.action_space.shape)) if env.action_type == "continuous" else 1
+        self.reset()
+
+    @property
+    def dim(self):
+        n = 8 * self.h + (self.n_act * self.h if self.h > 1 else 0)
+        return n + (12 if self.base is not None else 0)
+
+    def reset(self):
+        self.feats, self.acts = None, None
+        self.u_base = np.zeros(2)
+        if self.base is not None:
+            self.base.reset()
+
+    def observe(self, obs_raw):
+        f = self.env.features(obs_raw)
+        if self.h > 1:
+            if self.feats is None:                         # first step: repeat, no actions yet
+                self.feats = [f] * self.h
+                self.acts = [np.zeros(self.n_act, dtype=np.float32)] * self.h
+            else:
+                self.feats = self.feats[1:] + [f]
+            f = np.concatenate([*self.feats, *self.acts])
+        if self.base is not None:
+            self.u_base = self.base(obs_raw)
+            sc = U_OBS_SCALE_MPS2 * MPS2
+            x_hat = self.base.xa[:4]
+            d_hat = self.base.xa[4:]
+            f = np.concatenate([f, self.env.features(x_hat), self.u_base / sc, d_hat / sc])
+        return f.astype(np.float32)
+
+    def act(self, action):
+        u = self.env.action_to_accel(action)
+        if self.h > 1:
+            a = np.asarray(action, dtype=np.float32).reshape(self.n_act)
+            self.acts = self.acts[1:] + [a]
+        if self.base is not None:
+            u = self.u_base + u
+            mag = np.hypot(*u)
+            if mag > self.env.u_max:
+                u = u * (self.env.u_max / mag)
+            self.base.u_prev = u          # the filter must predict with the thrust applied
+        return u
+
+
 class L1StationKeepingEnv(gym.Env):
     metadata = {"render_modes": []}
 
     def __init__(self, action_type="discrete", episode_days=365, max_offset_km=1000.0,
                  max_vel_mps=0.05, noise=None, w_pos=0.1, w_fuel=10.0, fail_penalty=100.0,
                  u_max_mps2=THRUST_LEVELS_MPS2[-1], action_power=1.0, dt_days=1.0, seed=None,
-                 perturbation_k=0.0, dr_k_max=0.0):
+                 perturbation_k=0.0, dr_k_max=0.0, history_len=1, residual=None):
         super().__init__()
+        self.history_len = int(history_len)
+        self.residual = residual
         self.sim = StationKeepingSim(dt_days=dt_days, noise=noise, seed=seed)
         self.perturbation_k = float(perturbation_k)
         self.dr_k_max = float(dr_k_max)
@@ -83,7 +159,9 @@ class L1StationKeepingEnv(gym.Env):
         else:
             raise ValueError("action_type must be 'discrete' or 'continuous'")
 
-        self.observation_space = spaces.Box(-np.inf, np.inf, shape=(8,), dtype=np.float32)
+        self.builder = ObsBuilder(self)
+        self.observation_space = spaces.Box(-np.inf, np.inf, shape=(self.builder.dim,),
+                                            dtype=np.float32)
         self._steps = 0
         self._obs_raw = np.zeros(4)
 
@@ -132,11 +210,12 @@ class L1StationKeepingEnv(gym.Env):
                 self.perturbation_k, f0=rng.uniform(0.0, 2 * math.pi))
         self._obs_raw = self.sim.reset(offset, vel)
         self._steps = 0
-        return self.features(self._obs_raw), {}
+        self.builder.reset()
+        return self.builder.observe(self._obs_raw), {}
 
     def step(self, action):
         dv_before = self.sim.dv
-        self._obs_raw, failed = self.sim.step(self.action_to_accel(action))
+        self._obs_raw, failed = self.sim.step(self.builder.act(action))
         self._steps += 1
         dv_mps = (self.sim.dv - dv_before) / MPS
         dist_km = self.sim.distance_km
@@ -146,7 +225,7 @@ class L1StationKeepingEnv(gym.Env):
             reward -= self.fail_penalty
         truncated = self._steps >= self.episode_steps
         info = {"distance_km": dist_km, "dv_mps": dv_mps, "dv_total_mps": self.sim.dv / MPS}
-        return self.features(self._obs_raw), float(reward), bool(failed), truncated, info
+        return self.builder.observe(self._obs_raw), float(reward), bool(failed), truncated, info
 
 
 class PolicyController:
@@ -158,6 +237,10 @@ class PolicyController:
 
     def __init__(self, env, predict):
         self.env, self.predict = env, predict
+        self.builder = ObsBuilder(env)
+
+    def reset(self):
+        self.builder.reset()
 
     def __call__(self, obs):
-        return self.env.action_to_accel(self.predict(self.env.features(obs)))
+        return self.builder.act(self.predict(self.builder.observe(obs)))

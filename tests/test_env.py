@@ -125,3 +125,55 @@ def test_saved_policy_round_trip(tmp_path):
     obs = StationKeepingSim(noise=NoiseModel.none()).reset((100.0, 0.0))
     u = ctrl(obs)
     assert u.shape == (2,) and math.hypot(*u) <= env.u_max * (1 + 1e-12)
+
+
+# ------------------------------------------------------------ phase 8
+@pytest.mark.parametrize("kw", [{"history_len": 10}, {"residual": {"rho": 1.0}},
+                                {"history_len": 4, "residual": {"rho": 1.0}}])
+def test_phase8_envs_pass_the_gymnasium_checker(kw):
+    check_env(L1StationKeepingEnv(action_type="continuous", dr_k_max=4.0, **kw),
+              skip_render_check=True)
+
+
+@pytest.mark.parametrize("kw", [{"history_len": 10}, {"residual": {"rho": 1.0}}])
+def test_policy_controller_sees_what_the_env_shows(kw):
+    """Flying a fixed action sequence through the env and through
+    PolicyController + run_episode must give identical observations."""
+    env = L1StationKeepingEnv(action_type="continuous", **kw)
+    rng = np.random.default_rng(0)
+    actions = rng.uniform(-0.3, 0.3, (30, 2))
+    obs, _ = env.reset(seed=11, options={"offset_km": (200.0, 0.0)})
+    env_obs = [obs]
+    for a in actions:
+        obs, *_ = env.step(a)
+        env_obs.append(obs)
+    seen = []
+
+    def predict(f):
+        seen.append(f.copy())
+        return actions[len(seen) - 1]
+
+    env2 = L1StationKeepingEnv(action_type="continuous", **kw)
+    sim = StationKeepingSim()
+    sim.rng = np.random.default_rng(11)        # same draws as env.reset(seed=11)
+    run_episode(sim, PolicyController(env2, predict), days=30, offset_km=(200.0, 0.0))
+    for a, b in zip(env_obs[:30], seen):
+        assert np.allclose(a, b, rtol=0, atol=1e-6)
+
+
+def test_history_observation_layout():
+    env = L1StationKeepingEnv(action_type="continuous", history_len=3)
+    obs, _ = env.reset(seed=0)
+    assert obs.shape == (8 * 3 + 2 * 3,)
+    assert np.array_equal(obs[:8], obs[8:16])          # first step repeats the estimate
+    obs, *_ = env.step(np.array([0.5, -0.25]))
+    assert np.allclose(obs[-2:], [0.5, -0.25])          # newest action last
+
+
+def test_residual_zero_action_is_the_bias_lqr():
+    from cr3bp.control import BiasLQRController
+    env = L1StationKeepingEnv(action_type="continuous", residual={"rho": 1.0})
+    ctrl = PolicyController(env, lambda f: np.zeros(2))
+    a = run_episode(StationKeepingSim(seed=4), ctrl, days=100)
+    b = run_episode(StationKeepingSim(seed=4), BiasLQRController(rho=1.0, u_max_mps2=1e-6), days=100)
+    assert np.allclose(a["dist_km"], b["dist_km"], rtol=1e-12)
