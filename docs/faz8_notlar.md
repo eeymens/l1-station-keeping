@@ -81,7 +81,7 @@ Toparlanmada (1000 km'den başla) RES-PPO 25 durumun 25'inde domine ediliyor (za
 
 %1'in altındaki farklar tehlikeli, o yüzden iki ek sınama yaptık:
 
-- **Yeni 100 seed (200–299), daha sık klasik ızgara** (`scripts/14_confirmation.py`): 1710 tasarım (Bias-LQR ve LQI, r_ref = 1000/300/100/30/10 km × 57 ρ) ve eşleştirilmiş bootstrap. Sonuç: 15 durumun 13'ünde domine edilmiyor, zarfın 0.994–1.001 katı.
+- **Yeni 100 seed (200–299), daha sık klasik ızgara** (`scripts/14_confirmation.py`): her k için 570 tasarım (Bias-LQR ve LQI, r_ref = 1000/300/100/30/10 km × 57 ρ; k = 0.5, 1, 2 → toplam 1710) ve eşleştirilmiş bootstrap. Sonuç: 15 durumun 13'ünde domine edilmiyor, zarfın 0.994–1.001 katı.
 - **Sık yerel arama** (`scripts/15_frontier_search.py`): Bias-LQR'nin iki ayar parametresi (r_ref ve c = ρ·(r_ref/1000)²) RES noktalarının etrafında 21 × 21 ızgarayla tarandı. Her k için toplam 1011 tasarım var. Sonuç: **10 ajanın hiçbiri domine edilmiyor, 9'u zarfın altında. Ama en büyük fark %0.6, yani yılda en fazla 0.010 m/s.**
 
 ### Tek cümlelik özet (jüri için)

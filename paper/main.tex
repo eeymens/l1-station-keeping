@@ -665,8 +665,9 @@ costs fuel instead: \peResAcqMin--\peResAcqMax$\times$ the envelope, dominated i
 
 \paragraph{Confirmation on fresh seeds.} Margins below one per cent need
 care, so we re-tested the holding claim on 100 new seeds (200--299) against a
-denser grid of 1710 Bias-LQR and LQI designs ($r_\text{ref} \in \{1000, 300,
-100, 30, 10\}$~km $\times$ 57 values of $\rho$), with a paired bootstrap over
+denser grid of 570 Bias-LQR and LQI designs per severity ($r_\text{ref} \in
+\{1000, 300, 100, 30, 10\}$~km $\times$ 57 values of $\rho$, at $k = 0.5$, 1 and
+2), with a paired bootstrap over
 the seeds. RES-PPO is not dominated in
 \the\numexpr\peConfCases-\peConfDominated\relax\ of \peConfCases\ cases and lies
 \peConfEnvMin--\peConfEnvMax$\times$ the envelope; the bootstrap intervals are
@@ -729,7 +730,7 @@ is decades old and only a few lines of code, and with it the classical
 controllers stay Pareto-optimal. The setting in which we would expect RL to
 gain is one where the missing physics cannot be summarised as a slowly
 varying bias, or where it can only be inferred from a history of
-observations. That calls for a recurrent or history-based policy. Phase~8 tested the simplest version of that idea and it
+observations. That calls for a recurrent or history-based policy. Our memory experiment tested the simplest version of that idea and it
 failed (Section~\ref{sec:phase8}); what worked was to keep the classical
 estimator and let RL correct its output. The residual agent matches the
 classical frontier, which is a useful practical result (a learned correction

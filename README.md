@@ -173,7 +173,7 @@ Explanatory notes in Turkish (equations, design choices, which line does what): 
 
 - **Memory did not help.** MEM-PPO is worse than DR-PPO in all 10 k/scenario combinations and much less consistent across seeds. Stacked observations carry the information but also 10× the navigation noise; with the unchanged training budget the network did not learn to use it.
 - **Residual RL reaches the frontier.** RES-PPO slides its base *along* the Bias-LQR frontier towards tighter tracking (k = 1: base 18 km / 1.75 m/s → 6.4 km / 1.87 m/s). In recovery it is dominated in all 25 cases (1.03–1.07× the envelope).
-- **Confirmation** (`scripts/14_confirmation.py`): 100 fresh seeds (200–299), 1,710 Bias-LQR and LQI designs (r_ref = 1000/300/100/30/10 km × 57 ρ), paired bootstrap. RES-PPO is not dominated in 13 of 15 holding cases, at 0.994–1.001× the envelope.
+- **Confirmation** (`scripts/14_confirmation.py`): 100 fresh seeds (200–299), 570 Bias-LQR and LQI designs per severity (r_ref = 1000/300/100/30/10 km × 57 ρ, at k = 0.5, 1, 2), paired bootstrap. RES-PPO is not dominated in 13 of 15 holding cases, at 0.994–1.001× the envelope.
 - **Dense frontier search** (`scripts/15_frontier_search.py`): because the envelope is very flat, Bias-LQR's two tuning parameters were searched on a 21 × 21 grid around the agents (1,011 designs per severity in total). **None dominates any of the 10 agents; 9 of 10 lie below the envelope, by at most 0.6 % (≤ 0.010 m/s per year).**
 
 So residual RL *matches* the best classical controller while holding under SRP, with a margin too small to matter physically. It learned to re-tune its classical base along the frontier, not a better control law. A practical upside: a zero action recovers the trusted classical controller.

@@ -62,7 +62,7 @@ Güneş ışığı araca çarpınca onu Güneş'ten dışarı doğru itiyor. 1 A
 
 **Pulsating koordinatlarda SRP:** Hesap çok temiz çıkıyor. SRP, Güneş'in efektif kütlesini (1 − μ)'den (1 − μ − a₀)'a düşürüyor. Kodda tek satırlık bir fark bu.
 
-**Fiziksel sonucu:** Denge noktası Güneş'e doğru ~180 km kayıyor (testte −100 ile −400 km arasında doğruluyoruz). SRP varken "L1'i tam tutmak" ile "kaymış denge noktasında beklemek" arasında büyük bir yakıt farkı var. Faz 7'nin en önemli fiziksel noktası bu.
+**Fiziksel sonucu:** Denge noktası Güneş'e doğru ~167 km kayıyor (testte −100 ile −400 km arasında doğruluyoruz). SRP varken "L1'i tam tutmak" ile "kaymış denge noktasında beklemek" arasında büyük bir yakıt farkı var. Faz 7'nin en önemli fiziksel noktası bu.
 
 ### 2c. Uyumsuzluk şiddeti k
 
