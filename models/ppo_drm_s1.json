@@ -1,0 +1,34 @@
+{
+  "algo": "ppo",
+  "env": {
+    "action_type": "continuous",
+    "action_power": 3.0,
+    "w_pos": 0.3,
+    "w_fuel": 10.0,
+    "dr_k_max": 4.0,
+    "dr_moon_max": 2.0
+  },
+  "train": {
+    "steps": 3000000,
+    "seed": 1,
+    "n_envs": 8,
+    "n_steps": 512,
+    "eval_every": 50000,
+    "lr": 0.0003,
+    "gamma": 0.99,
+    "log_std_init": -1.0,
+    "action_power": 3.0,
+    "w_pos": 0.3,
+    "w_fuel": 10.0,
+    "dr_k_max": 4.0,
+    "eval_ks": "0,1,2,4",
+    "history": 1,
+    "residual_rho": null,
+    "max_minutes": 330.0,
+    "dr_moon_max": 2.0,
+    "eval_moons": "0,1",
+    "residual_base": "bias",
+    "lstm": 0,
+    "name": "ppo_drm_s1"
+  }
+}
