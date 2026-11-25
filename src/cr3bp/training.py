@@ -70,10 +70,11 @@ class EvalCallback(BaseCallback):
     ``ks`` (phase 7): mismatch severities to evaluate at; the score is the mean
     over them. The default (0,) is the nominal CR3BP used in phases 4-6."""
 
-    def __init__(self, eval_env, every, out_path, ks=(0.0,)):
+    def __init__(self, eval_env, every, out_path, ks=(0.0,), moons=(0.0,)):
         super().__init__()
         self.eval_env, self.every, self.out_path = eval_env, every, out_path
         self.ks = tuple(ks)
+        self.moons = tuple(moons)            # phase 9: also evaluate with the Moon
         self.best, self.log, self._next = -np.inf, [], every
 
     def _on_step(self):
@@ -83,12 +84,14 @@ class EvalCallback(BaseCallback):
         self._next += self.every
         algo = "rppo" if self.model.__class__.__name__ == "RecurrentPPO" else "ppo"
         ctrl = PolicyController(self.eval_env, make_predictor(algo, self.model))
-        summs = {k: summarize(evaluate(ctrl, perturbation_k=k)) for k in self.ks}
-        summ = summs[self.ks[0]]
+        summs = {(k, m): summarize(evaluate(ctrl, perturbation_k=k, moon=m))
+                 for m in self.moons for k in self.ks}
+        summ = summs[(self.ks[0], self.moons[0])]
         sc = float(np.mean([score(s) for s in summs.values()]))
         row = {"step": self.num_timesteps, "score": sc}
-        if len(self.ks) > 1:
-            row.update({f"score_k{k:g}": score(s) for k, s in summs.items()})
+        if len(summs) > 1:
+            row.update({f"score_k{k:g}" + (f"_moon{m:g}" if m else ""): score(s)
+                        for (k, m), s in summs.items()})
         for name, m in summ.items():
             row.update({f"{name}_survival": m["survival"], f"{name}_days": m["days"],
                         f"{name}_dv_mps": m["dv_mps"], f"{name}_dist_km": m["mean_dist_km"]})

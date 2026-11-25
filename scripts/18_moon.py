@@ -16,6 +16,13 @@ for the first time:
     RL         DR-PPO, MEM-PPO, RES-PPO (phases 7-8) and LSTM-PPO (phase 9,
                if its models exist), 5 training seeds each
 
+Because Harmonic-LQR is built knowing the Moon's frequency while those agents
+never saw the Moon, two RL families are also trained *with* it (CI workflow
+train-moon.yml, same hyperparameters, Moon scale ~ U(0, 2) in the domain
+randomisation, selection with and without the Moon):
+    DR-PPO-M   DR-PPO with the Moon
+    RES-PPO-M  residual PPO on Harmonic-LQR (rho = 1), with the Moon
+
 Conditions (test seeds 100-119, one year):
     Moon        k = 0 + Moon: the CR3BP plus the Moon only
     k=1 + Moon  real eccentricity and SRP (phase 7, k = 1) plus the Moon
@@ -67,9 +74,12 @@ RL = {
     "MEM-PPO": [f"ppo_mem_s{s}" for s in range(5)],
     "RES-PPO": [f"ppo_res_s{s}" for s in range(5)],
     "LSTM-PPO": [f"ppo_lstm_s{s}" for s in range(5)],
+    "DR-PPO-M": [f"ppo_drm_s{s}" for s in range(5)],      # trained with the Moon
+    "RES-PPO-M": [f"ppo_resm_s{s}" for s in range(5)],    # on Harmonic-LQR, with the Moon
 }
 COLORS = {**mm.COLORS, "Harmonic-LQR": "#7d3c98", "MEM-PPO": "#8e44ad",
-          "RES-PPO": "#16a085", "LSTM-PPO": "#d35400"}
+          "RES-PPO": "#16a085", "LSTM-PPO": "#d35400", "DR-PPO-M": "#e74c3c",
+          "RES-PPO-M": "#1abc9c"}
 NO_MOON = {"DR-PPO": "phase8.csv", "MEM-PPO": "phase8.csv", "RES-PPO": "phase8.csv",
            "LSTM-PPO": "phase9.csv"}
 

@@ -1,0 +1,53 @@
+name: train-moon
+
+# Phase 9: RL trained *with* the Moon, for a fair comparison with Harmonic-LQR
+# (which is built knowing the Moon's frequency). One job per family and seed.
+#   ppo_drm_s*   DR-PPO with the Moon in the domain randomisation
+#   ppo_resm_s*  residual PPO on Harmonic-LQR, Moon in the domain randomisation
+# Same hyperparameters as DR-PPO / RES-PPO; model selection on seeds 0-4 at
+# k = 0, 1, 2, 4 with and without the Moon. Download the artifacts into the
+# repository root, then run scripts/18_moon.py --reuse-classical.
+
+on:
+  workflow_dispatch:
+    inputs:
+      steps:
+        description: "training steps per agent"
+        default: "3000000"
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    strategy:
+      fail-fast: false
+      matrix:
+        family: [drm, resm]
+        seed: [0, 1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install (CPU-only PyTorch)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e ".[dev,rl]"
+      - name: Train ppo_${{ matrix.family }}_s${{ matrix.seed }}
+        run: |
+          EXTRA=""
+          if [ "${{ matrix.family }}" = "resm" ]; then EXTRA="--residual-rho 1 --residual-base harmonic"; fi
+          python scripts/08_train_ppo.py --steps ${{ inputs.steps }} --seed ${{ matrix.seed }} \
+            --dr-k-max 4 --eval-ks 0,1,2,4 --dr-moon-max 2 --eval-moons 0,1 $EXTRA \
+            --max-minutes 330 --name ppo_${{ matrix.family }}_s${{ matrix.seed }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ppo_${{ matrix.family }}_s${{ matrix.seed }}
+          path: |
+            models/ppo_${{ matrix.family }}_s${{ matrix.seed }}.*
+            experiments/ppo_${{ matrix.family }}_s${{ matrix.seed }}_training.csv
+            figures/ppo_${{ matrix.family }}_s${{ matrix.seed }}_learning_curve.png
+          if-no-files-found: warn

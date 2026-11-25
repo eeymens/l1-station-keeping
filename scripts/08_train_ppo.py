@@ -37,6 +37,11 @@ Phase 9 (same hyperparameters, same domain randomisation):
                           128 units in front of the same 128-128 heads. It sees
                           only the current observation and must build its own
                           memory (ppo_lstm_s*). Needs `pip install sb3-contrib`.
+    --dr-moon-max 2 --eval-moons 0,1
+                          the Moon in the domain randomisation (scale ~ U(0, 2),
+                          random phase) and in model selection (ppo_drm_s*)
+    --residual-rho 1 --residual-base harmonic
+                          residual RL on Harmonic-LQR instead of Bias-LQR (ppo_resm_s*)
 """
 
 import argparse
@@ -89,6 +94,12 @@ def main():
     p.add_argument("--max-minutes", type=float, default=0.0,
                    help="stop training after this much wall-clock time (0 = no limit); "
                         "the best model so far is kept, the log records the last step")
+    p.add_argument("--dr-moon-max", type=float, default=0.0,
+                   help="phase 9: Moon scale ~ U(0, dr_moon_max) per episode (needs --dr-k-max)")
+    p.add_argument("--eval-moons", default="0",
+                   help="phase 9: comma-separated Moon scales for model selection")
+    p.add_argument("--residual-base", choices=("bias", "harmonic"), default="bias",
+                   help="phase 9: classical base of the residual agent")
     p.add_argument("--lstm", type=int, default=0,
                    help="phase 9: recurrent PPO with an LSTM of this many units")
     p.add_argument("--name", default="ppo_l1", help="output name for model, CSV and figure")
@@ -103,6 +114,10 @@ def main():
         env_kwargs["history_len"] = args.history
     if args.residual_rho is not None:
         env_kwargs["residual"] = {"rho": args.residual_rho}
+        if args.residual_base == "harmonic":
+            env_kwargs["residual"]["base"] = "harmonic"
+    if args.dr_moon_max > 0:
+        env_kwargs["dr_moon_max"] = args.dr_moon_max
     env = make_vec_env(L1StationKeepingEnv, n_envs=args.n_envs, seed=args.seed,
                        env_kwargs=env_kwargs)
     (ROOT / "models").mkdir(exist_ok=True)
@@ -123,7 +138,9 @@ def main():
         policy_kwargs=policy_kwargs,
     )
     eval_ks = tuple(float(k) for k in args.eval_ks.split(","))
-    cb = EvalCallback(L1StationKeepingEnv(**env_kwargs), args.eval_every, model_path, ks=eval_ks)
+    eval_moons = tuple(float(m) for m in args.eval_moons.split(","))
+    cb = EvalCallback(L1StationKeepingEnv(**env_kwargs), args.eval_every, model_path, ks=eval_ks,
+                      moons=eval_moons)
     t0 = time.time()
     callbacks = [cb]
     if args.max_minutes > 0:

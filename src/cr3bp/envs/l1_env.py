@@ -41,6 +41,11 @@ Phase 8 options (both default to the phase 4-7 behaviour)
                     u = u_BiasLQR + u_agent (norm capped at u_max), and the
                     observation adds the filter's state estimate, its force
                     estimate and the base thrust (hybrid "residual RL").
+                    Phase 9: {"base": "harmonic", ...} uses a
+                    `HarmonicLQRController` instead (the force estimate passed
+                    to the agent is then its total, constant + oscillating).
+    dr_moon_max     phase 9, with dr_k_max > 0: the Moon is added every episode
+                    with a scale ~ U(0, dr_moon_max) and a random phase.
 
 The observation is assembled by an `ObsBuilder`, which `PolicyController`
 shares, so an agent is flown exactly as it was trained.
@@ -52,6 +57,7 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
+from ..control.harmonic import HarmonicLQRController
 from ..control.lqi import BiasLQRController
 from ..control.station_keeping import KM, MPS, MPS2, NoiseModel, StationKeepingSim
 from ..perturbations import Perturbation
@@ -79,7 +85,11 @@ class ObsBuilder:
     def __init__(self, env):
         self.env = env
         self.h = env.history_len
-        self.base = (BiasLQRController(**env.residual) if env.residual is not None else None)
+        self.base = None
+        if env.residual is not None:                 # phase 8 (Bias-LQR) / 9 (Harmonic-LQR)
+            kw = dict(env.residual)
+            harmonic = kw.pop("base", "bias") == "harmonic"
+            self.base = (HarmonicLQRController if harmonic else BiasLQRController)(**kw)
         self.n_act = int(np.prod(env.action_space.shape)) if env.action_type == "continuous" else 1
         self.reset()
 
@@ -107,7 +117,8 @@ class ObsBuilder:
             self.u_base = self.base(obs_raw)
             sc = U_OBS_SCALE_MPS2 * MPS2
             x_hat = self.base.xa[:4]
-            d_hat = self.base.xa[4:]
+            d_hat = (self.base.xa[4:6] if self.base.xa.size == 6       # total force estimate
+                     else self.base.Cd @ self.base.xa[4:])
             f = np.concatenate([f, self.env.features(x_hat), self.u_base / sc, d_hat / sc])
         return f.astype(np.float32)
 
@@ -131,8 +142,10 @@ class L1StationKeepingEnv(gym.Env):
     def __init__(self, action_type="discrete", episode_days=365, max_offset_km=1000.0,
                  max_vel_mps=0.05, noise=None, w_pos=0.1, w_fuel=10.0, fail_penalty=100.0,
                  u_max_mps2=THRUST_LEVELS_MPS2[-1], action_power=1.0, dt_days=1.0, seed=None,
-                 perturbation_k=0.0, dr_k_max=0.0, history_len=1, residual=None):
+                 perturbation_k=0.0, dr_k_max=0.0, history_len=1, residual=None,
+                 dr_moon_max=0.0):
         super().__init__()
+        self.dr_moon_max = float(dr_moon_max)
         self.history_len = int(history_len)
         self.residual = residual
         self.sim = StationKeepingSim(dt_days=dt_days, noise=noise, seed=seed)
@@ -205,6 +218,9 @@ class L1StationKeepingEnv(gym.Env):
             self.sim.perturbation = Perturbation.from_k(
                 rng.uniform(0.0, self.dr_k_max), f0=rng.uniform(0.0, 2 * math.pi),
                 srp_scale=rng.uniform(0.5, 1.5))
+            if self.dr_moon_max > 0.0:                 # phase 9, drawn after the phase-7 draws
+                self.sim.perturbation.moon = rng.uniform(0.0, self.dr_moon_max)
+                self.sim.perturbation.moon_phase0 = rng.uniform(0.0, 2 * math.pi)
         elif self.perturbation_k > 0.0:
             self.sim.perturbation = Perturbation.from_k(
                 self.perturbation_k, f0=rng.uniform(0.0, 2 * math.pi))

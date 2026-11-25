@@ -216,3 +216,35 @@ def test_lstm_state_carries_over_and_resets(tmp_path):
     a = evaluate(ctrl, seeds=range(2), days=30, perturbation_k=1.0)
     b = evaluate(ctrl, seeds=range(2), days=30, perturbation_k=1.0)
     assert [r["dv_mps"] for r in a] == [r["dv_mps"] for r in b]
+
+
+HARM = {"rho": 1.0, "base": "harmonic"}
+
+
+@pytest.mark.parametrize("kw", [{"dr_moon_max": 2.0}, {"residual": HARM},
+                                {"residual": HARM, "dr_moon_max": 2.0}])
+def test_moon_envs_pass_the_gymnasium_checker(kw):
+    check_env(L1StationKeepingEnv(action_type="continuous", dr_k_max=4.0, **kw),
+              skip_render_check=True)
+
+
+def test_moon_randomisation_leaves_the_phase7_draws_alone():
+    a = L1StationKeepingEnv(action_type="continuous", dr_k_max=4.0)
+    b = L1StationKeepingEnv(action_type="continuous", dr_k_max=4.0, dr_moon_max=2.0)
+    a.reset(seed=3)
+    b.reset(seed=3)
+    pa, pb = a.sim.perturbation, b.sim.perturbation
+    assert (pa.e, pa.srp_mps2, pa.f0) == (pb.e, pb.srp_mps2, pb.f0)
+    assert pa.moon == 0.0 and 0.0 < pb.moon < 2.0
+
+
+def test_residual_zero_action_is_the_harmonic_lqr():
+    from cr3bp.control import HarmonicLQRController
+    from cr3bp.evaluation import perturbation_for
+    env = L1StationKeepingEnv(action_type="continuous", residual=dict(HARM))
+    ctrl = PolicyController(env, lambda f: np.zeros(2))
+    p = perturbation_for(1.0, 4, moon=1.0)
+    a = run_episode(StationKeepingSim(seed=4, perturbation=p), ctrl, days=100)
+    b = run_episode(StationKeepingSim(seed=4, perturbation=perturbation_for(1.0, 4, moon=1.0)),
+                    HarmonicLQRController(rho=1.0, u_max_mps2=1e-6), days=100)
+    assert np.allclose(a["dist_km"], b["dist_km"], rtol=1e-12)
