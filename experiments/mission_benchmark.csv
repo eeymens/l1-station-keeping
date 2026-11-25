@@ -8,5 +8,6 @@ this work,"classical, cheapest",k = 1,0.40028273832312306,221.6921323766247,"Bia
 this work,"classical, cheapest within 10 km",k = 1,1.848151032847096,9.244259059660493,"Bias-LQR, rho = 0.421697, r_ref = 1000 km",hold a point,scripts/12
 this work,DR-PPO,k = 1,2.024918774729895,1.4418621143568149,mean of 5 training seeds,hold a point,scripts/13
 this work,RES-PPO,k = 1,1.8695504379202994,6.415605410461881,mean of 5 training seeds,hold a point,scripts/13
+this work,LSTM-PPO,k = 1,1.8972183705439114,3.1795285664955353,mean of 5 training seeds,hold a point,scripts/16
 this work,"classical, cheapest",k = 1 + Moon,1.3026785001285845,720.1661912788443,"Harmonic-LQR, rho = 10000, r_ref = 1000 km",hold a point,scripts/18
 this work,"classical, cheapest within 10 km",k = 1 + Moon,6.322481822342786,9.598014139050152,"Harmonic-LQR, rho = 31.6228, r_ref = 10 km",hold a point,scripts/18

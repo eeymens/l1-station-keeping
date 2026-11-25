@@ -106,7 +106,30 @@ LSTM'li PPO, MLP'li PPO'dan ~10 kat yavaş: Bir seed için MLP ~25 dk sürerken 
 
 ### Sonuçlar
 
-*(Eğitim bitince doldurulacak: `python scripts/16_lstm.py`.)*
+5 seed'in hepsi 3M adımı tamamladı (GitHub Actions, seed başına ~4 saat). Test seed'leri 100–119, sayılar 5 seed'in ortalaması. "× en iyi klasik": aynı doğrulukta en ucuz klasik tasarımın Δv'sine oran.
+
+| k | DR-PPO | MEM-PPO | LSTM-PPO | LSTM / DR-PPO | Domine edilmeyen LSTM seed'i |
+| --- | --- | --- | --- | --- | --- |
+| 0 (tutma) | 5.92 | 12.20 | 8.06 | 1.50 | 0/5 |
+| 0.5 | 1.095 | 1.332 | 1.008 | 0.90 | 2/5 |
+| 1 | 1.057 | 1.151 | 0.996 | 0.94 | 4/5 |
+| 2 | 1.028 | 1.071 | 0.998 | 0.97 | 4/5 |
+| 4 | 1.017 | 1.045 | 1.000 | 0.98 | 4/5 |
+
+Kurtarmada (acquisition) LSTM-PPO yine DR-PPO'dan biraz ucuz ama 25 durumun 25'inde domine ediliyor.
+
+**Cevap (a): sorun ağdaydı.**
+- SRP varken (k ≥ 0.5) LSTM-PPO, aynı seed'li DR-PPO'dan 40 durumun 33'ünde daha az yakıt harcıyor. Tutmada %2–10 tasarruf.
+- Tutmada 20 seed/k durumunun **14'ünde hiçbir klasik tasarım onu domine etmiyor**. k ≥ 1'de klasik zarfın 0.992–1.007 katında, L1'e 6 km'den yakın.
+- Yani klasik bir taban olmadan, **tamamen öğrenilmiş** bir kontrolcü ilk kez Pareto sınırına ulaştı. Bilgi gözlemlerde varmış, 10 günlük yığılmış pencere onu çıkaramamış, LSTM çıkarıyor.
+
+**İki sınır (rapora dürüstçe yaz):**
+- SRP yokken (k = 0) hafıza pahalıya geliyor: DR-PPO'nun 1.5 katı yakıt (yılda 0.24 m/s, mutlak olarak çok küçük). "Kuvvet yok" cevabını öğrenememiş.
+- RES-PPO gibi sınıra **ulaşıyor ama onu ileri itmiyor**. LSTM, Kalman filtresinin yaptığını kendi öğrendi, daha iyisini değil.
+
+Jüri sorusu: "LSTM klasikten iyi mi?" → Hayır. Klasik kadar iyi. Ama bunu kimse ona söylemeden, sadece deneyimle öğrendi. Faz 8'deki MEM-PPO başarısızlığını açıklıyor.
+
+Ay altında ise LSTM-PPO (Ay'ı hiç görmedi) domine ediliyor: Eğitimde gördüğü kuvveti (SRP) kestirmeyi öğrenmiş, her kuvveti değil. Ay bölümüne bak.
 
 ### Olası sonuçlar nasıl yorumlanır?
 
@@ -172,7 +195,7 @@ Hiçbir kontrolcü Ay ile tasarlanmadı ya da eğitilmedi. Hepsi Ay'la burada **
 
 - Koşullar: "Moon" (sadece CR3BP + Ay) ve "k=1 + Moon" (gerçek eksantriklik, SRP ve Ay).
 - Klasik: LQR, LQI, Bias-LQR, Harmonic-LQR, her biri Faz 7'deki 115 (ρ, r_ref) tasarımıyla.
-- RL: DR-PPO, MEM-PPO, RES-PPO (ve hazır olunca LSTM-PPO), 5'er seed.
+- RL: DR-PPO, MEM-PPO, RES-PPO, LSTM-PPO, 5'er seed.
 - Test seed'leri 100–119, bir yıl.
 
 ### Sonuçlar

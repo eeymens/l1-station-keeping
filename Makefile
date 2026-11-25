@@ -15,7 +15,7 @@
 PYTHON ?= python
 S := scripts
 
-.PHONY: install test reproduce figures lqr evaluate mismatch phase8 missions paper-assets paper train clean-paper
+.PHONY: install test reproduce figures lqr evaluate mismatch phase8 phase9 missions paper-assets paper train clean-paper
 
 install:
 	$(PYTHON) -m pip install -e ".[dev,rl]"
@@ -23,7 +23,7 @@ install:
 test:
 	$(PYTHON) -m pytest -q
 
-reproduce: test figures lqr evaluate mismatch phase8 missions paper-assets
+reproduce: test figures lqr evaluate mismatch phase8 phase9 missions paper-assets
 
 # Phases 1-2: dynamics, Lagrange points, uncontrolled escape (seconds)
 figures:
@@ -54,6 +54,10 @@ phase8:
 	$(PYTHON) $(S)/13_memory_residual.py
 	$(PYTHON) $(S)/14_confirmation.py
 	$(PYTHON) $(S)/15_frontier_search.py
+
+# Phase 9: recurrent (LSTM) PPO (~5 min)
+phase9:
+	$(PYTHON) $(S)/16_lstm.py
 
 # Phase 9: the Moon as unmodelled physics (~45 min on two cores) and a dense
 # classical frontier search under it (~45 min) with a fresh-seed check (~30 min),

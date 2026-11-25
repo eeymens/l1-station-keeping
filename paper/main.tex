@@ -52,9 +52,11 @@ $L_1$ about \mmDvGrowthKone-fold at realistic levels. PPO agents trained with
 domain randomisation hold $L_1$ under SRP more tightly than any default classical design
 and come within \mmDrHoldMin--\mmDrHoldMax$\times$ of the best of \mmDesigns\
 classical designs, but all \mmRlRuns\ RL test cases are still dominated once the
-classical side is allowed integral action or a disturbance estimator. Giving
-PPO a memory of past observations does not help, but residual RL on top of the
-disturbance-estimating LQR reaches the classical Pareto frontier: on 100 fresh
+classical side is allowed integral action or a disturbance estimator. A
+stacked window of past observations does not help PPO, but a recurrent (LSTM)
+policy does and, while holding, reaches the classical frontier on its own.
+Residual RL on top of the
+disturbance-estimating LQR also reaches the classical Pareto frontier: on 100 fresh
 seeds and after a dense search of the classical design space, no classical
 design dominates it, although its advantage is at most \peFsMarginMax\,\%.
 The Moon, whose pull near $L_1$ oscillates instead of staying constant, is
@@ -681,7 +683,7 @@ under SRP). At $k = 0$ it spends \peMemHoldDvKzero~m/s while holding,
 \peMemHoldRatioKzero$\times$ the best classical fuel. Stacking past
 observations gives the network the information, but also ten times the
 navigation noise and a much larger input, and with our unchanged training
-budget it did not learn to use it. A recurrent policy or a longer budget might.
+budget it did not learn to use it. A recurrent policy does (Section~\ref{sec:lstm}).
 
 \paragraph{Residual RL reaches the classical frontier.} RES-PPO is the first
 learned controller in this study that is not dominated. While holding at
@@ -725,6 +727,50 @@ along the Bias-LQR frontier; MEM-PPO scatters above it.}
 \label{fig:phase8}
 \end{figure}
 
+\subsection{A recurrent policy}
+\label{sec:lstm}
+
+MEM-PPO left two explanations open: either a feed-forward network cannot pull
+a slowly varying force out of a noisy ten-day window with our training budget
+(the architecture), or the information is too weak in the noisy observations
+for any network (the information). \emph{LSTM-PPO} separates the two. It is
+DR-PPO with a 128-unit LSTM in front of the policy and value networks
+(recurrent PPO from \texttt{sb3-contrib}): it sees only the current
+observation, like DR-PPO, but carries its own memory through the whole
+episode. Everything else is unchanged (hyperparameters, $k \sim U(0, 4)$, model
+selection, 3M steps, five training seeds); its memory is reset at the start of
+each episode, which a unit test checks. Table~\ref{tab:lstm} compares it with
+the two phase-8 agents on the test seeds.
+
+\begin{table}[t]
+\centering
+\caption{Recurrent PPO, test seeds 100--119: $\dv$ divided by that of the
+cheapest classical design (of \mmDesigns) that is at least as accurate, mean
+$\pm$ std over 5 training seeds; LSTM-PPO's $\dv$ divided by that of DR-PPO
+with the same training seed; and the number of LSTM-PPO seeds that no
+classical design dominates.}
+\label{tab:lstm}
+\small
+\input{generated/tab_lstm}
+\end{table}
+
+\paragraph{The architecture was the problem.} LSTM-PPO uses less fuel than
+DR-PPO with the same training seed in \lsPertWin\ of \lsPertCases\ cases with
+SRP ($k \ge 0.5$), \lsHoldSaveMin--\lsHoldSaveMax\,\% less while holding, and
+in \lsWinCases\ of \lsCases\ cases overall. While holding with SRP it is
+the first \emph{purely learned} controller that reaches the classical
+frontier: \lsNondom\ of \lsNondomOf\ seed/severity cases are not dominated by
+any classical design, and at $k \ge 1$ its $\dv$ lies
+\lsEnvMin--\lsEnvMax$\times$ the classical envelope, holding within
+\lsHoldDistMax~km. The information MEM-PPO failed to use was therefore in the
+observations; a recurrent network extracts it, a stacked window with the same
+budget did not. Two limits remain. Without SRP ($k = 0$) memory costs fuel:
+LSTM-PPO spends \lsKzeroVsDr$\times$ DR-PPO's (\lsKzeroDv~m/s per year), so it
+has not learned that ``no force'' is also an answer. In recovery it is
+dominated in \lsAcqDom\ of \lsAcqOf\ cases, like every agent before it. As for
+RES-PPO, reaching the frontier is not moving it: LSTM-PPO learned to do what
+the Kalman filter does, not something better.
+
 \subsection{The Moon: a disturbance that is not a bias}
 \label{sec:moon}
 
@@ -763,7 +809,9 @@ constant.
 (Table~\ref{tab:moon}). DR-PPO spends \moDrAllOnly$\times$ the best classical
 fuel under the Moon alone. Memory now helps: MEM-PPO, worse than DR-PPO under
 SRP, spends half as much here (\moMemAllOnly$\times$), since a stack of past
-observations is informative about a force that changes within days.
+observations is informative about a force that changes within days. LSTM-PPO,
+the best agent under SRP, spends \lsMoonAll$\times$: it learned to estimate the
+force it was trained on, not unmodelled forces in general.
 
 \paragraph{Agents trained with the Moon.} RES-PPO-M is not dominated by the
 coarse sweep in any holding case, but a dense search of Harmonic-LQR and
@@ -860,9 +908,11 @@ is decades old and only a few lines of code, and with it the classical
 controllers stay Pareto-optimal. The setting in which we would expect RL to
 gain is one where the missing physics cannot be summarised as a slowly
 varying bias, or where it can only be inferred from a history of
-observations. That calls for a recurrent or history-based policy. Our memory experiment tested the simplest version of that idea and it
-failed (Section~\ref{sec:phase8}); what worked was to keep the classical
-estimator and let RL correct its output. The residual agent matches the
+observations. That calls for a recurrent or history-based policy. A stacked observation
+window failed (Section~\ref{sec:phase8}), but a recurrent policy succeeded:
+LSTM-PPO learned to do what the Kalman filter does and reached the frontier
+without any classical help (Section~\ref{sec:lstm}). Keeping the classical
+estimator and letting RL correct its output also works. The residual agent matches the
 classical frontier, which is a useful practical result (a learned correction
 on a trusted classical controller is easy to certify, since a zero action
 recovers the classical one), but it is not evidence that RL beats classical
@@ -908,12 +958,13 @@ PPO agent comes within \mmDrHoldMin--\mmDrHoldMax$\times$ of the best classical
 fuel. Classical controllers with integral action or a disturbance estimator
 still dominate it, and Earth's eccentricity has almost no effect on holding the
 point. A residual PPO correction on that estimator reaches, but does not
-meaningfully move, the classical frontier. Under the Moon's periodic pull,
+meaningfully move, the classical frontier, and so does a recurrent PPO agent
+without a classical base. Under the Moon's periodic pull,
 PPO trained with the Moon beats every classical design that does not model it
 and, in two of five seeds, edges slightly below the frontier of one that does.
 Natural next steps are halo-orbit
-station-keeping in three dimensions (where the eccentricity matters), recurrent
-RL policies that can infer unmodelled forces, and residual RL in settings where
+station-keeping in three dimensions (where the eccentricity matters),
+recurrent policies trained with the Moon, and residual RL in settings where
 the linearisation itself fails, such as large halo orbits, where a learned
 correction has more to add.
 

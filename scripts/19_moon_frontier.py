@@ -52,21 +52,31 @@ def _job(job):
             "scenario": "holding", **{key: s[key] for key in moon.mm.METRICS}}
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--workers", type=int, default=2)
-    args = ap.parse_args()
+def sweep(workers):
     jobs = [(c, f, float(r), float(p)) for c in moon.CONDITIONS for f in FAMILIES
             for r in R_REFS for p in RHOS]
-    print(f"{len(jobs)} design x condition runs (holding) on {args.workers} workers", flush=True)
+    print(f"{len(jobs)} design x condition runs (holding) on {workers} workers", flush=True)
     dense = []
-    with Pool(args.workers) as pool:
+    with Pool(workers) as pool:
         for i, row in enumerate(pool.imap(_job, jobs, chunksize=8)):
             dense.append(row)
             if (i + 1) % 200 == 0:
                 print(f"  {i + 1}/{len(jobs)}", flush=True)
     moon.mm.write_csv(EXP / "moon_frontier_designs.csv", dense)
-    dense = moon.read_classical(EXP / "moon_frontier_designs.csv")
+    return moon.read_classical(EXP / "moon_frontier_designs.csv")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--workers", type=int, default=2)
+    ap.add_argument("--reuse-designs", action="store_true",
+                    help="reuse experiments/moon_frontier_designs.csv, only re-check the agents")
+    args = ap.parse_args()
+    dpath = EXP / "moon_frontier_designs.csv"
+    if args.reuse_designs and dpath.exists():
+        dense = moon.read_classical(dpath)
+    else:
+        dense = sweep(args.workers)
 
     coarse = moon.read_classical(EXP / "moon_classical.csv")
     agents = [r for r in csv.DictReader(open(EXP / "moon.csv", newline=""))

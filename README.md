@@ -10,7 +10,7 @@ The Sun–Earth L1 point sits about 1.49 million km sunward of Earth. It is an e
 
 **Phase 8: give RL the missing information.** A memory of the last 10 observations makes PPO *worse*. A residual PPO correction on top of the Kalman bias-estimating LQR is the first learned controller that is **not dominated**: on 100 fresh seeds and after a dense search of 1,011 classical designs per severity, no classical design beats it while holding under SRP. Its edge is at most 0.6 % (≤ 0.01 m/s per year), though, so RL *reaches* the classical frontier rather than moving it.
 
-**Phase 9: the Moon, a reality check and a recurrent policy.** The Moon's pull near L1 *oscillates* (mostly every 14.8 days) instead of staying constant, the case where RL was expected to gain. A classical controller that models the Moon's known frequency (Harmonic-LQR, internal model principle) leads the classical side. PPO trained with the Moon spends 0.69–0.91× the fuel of classical controllers that do *not* model it, and 2 of 5 training seeds stay **1.4–1.6 % below the frontier even of Harmonic-LQR, confirmed on 100 fresh seeds** — the first learned controller below the classical frontier in this study, though narrowly (≤ 0.08 m/s per year). Our fuel costs are also in the range of flown L1/L2 missions (SOHO, ACE, WIND, JWST). A recurrent (LSTM) PPO tests whether phase 8's memory failure was the network or the information *(training on CI, results pending)*.
+**Phase 9: the Moon, a reality check and a recurrent policy.** The Moon's pull near L1 *oscillates* (mostly every 14.8 days) instead of staying constant, the case where RL was expected to gain. A classical controller that models the Moon's known frequency (Harmonic-LQR, internal model principle) leads the classical side. PPO trained with the Moon spends 0.69–0.91× the fuel of classical controllers that do *not* model it, and 2 of 5 training seeds stay **1.4–1.6 % below the frontier even of Harmonic-LQR, confirmed on 100 fresh seeds** — the first learned controller below the classical frontier in this study, though narrowly (≤ 0.08 m/s per year). Our fuel costs are also in the range of flown L1/L2 missions (SOHO, ACE, WIND, JWST). A recurrent (LSTM) PPO answers phase 8's memory failure: it was the network, not the information. LSTM-PPO uses less fuel than DR-PPO in 33 of 40 cases with SRP and, while holding, 14 of 20 seed/severity cases are not dominated by any classical design: the first *purely learned* controller on the SRP frontier, though not beyond it.
 
 📄 **Paper draft:** [`paper/main.pdf`](paper/main.pdf) · **Reproduce everything:** `make reproduce` (see [Reproducing the results](#reproducing-the-results))
 
@@ -30,7 +30,7 @@ The Sun–Earth L1 point sits about 1.49 million km sunward of Earth. It is an e
 | 6 | Paper draft (numbers generated from the CSVs), one-command reproduction, CI | Done |
 | 7 | Model mismatch: elliptic Earth orbit + solar radiation pressure, LQI and Kalman bias-estimating LQR, domain-randomised PPO (5 seeds) | Done |
 | 8 | RL with memory and residual RL on Bias-LQR (5 seeds each), confirmation on fresh seeds and a dense classical frontier search | Done |
-| 9 | The Moon (Harmonic-LQR, RL trained with the Moon, dense search, fresh-seed confirmation); plausibility check against flown missions; recurrent (LSTM) PPO, 5 seeds | Moon and benchmark done, LSTM training |
+| 9 | The Moon (Harmonic-LQR, RL trained with the Moon, dense search, fresh-seed confirmation); plausibility check against flown missions; recurrent (LSTM) PPO, 5 seeds | Done |
 
 ## Results
 
@@ -151,7 +151,7 @@ A severity k scales both (e = k × 0.0167, SRP × k; k = 1 realistic, k = 4 four
 - **Nominal PPO** (never trained on SRP) loses no runs but needs 1.23–1.42× the best classical fuel while holding and 1.30–3.92× in recovery.
 - **DR-PPO** holds L1 to 0.8–3.0 km at every k > 0, tighter than any ρ = 1 classical design, at 1.01–1.13× the best classical fuel (1.06–1.48× in recovery). But near L1 every controller has to pay the SRP cancellation cost, which pushes all ratios towards 1; in absolute terms DR-PPO still spends 0.06–0.24 m/s per year more. **All 80 RL test cases are dominated** by a classical design that is both cheaper and at least as accurate (73 of them by a Bias-LQR).
 - **A near-miss worth reporting.** With only the r_ref = 1000 km designs, DR-PPO at k = 4 looked more accurate than every classical controller. That came from tuning the classical side too narrowly; a tighter position scale removes it.
-- **Robustness has a price.** At k = 0, DR-PPO needs 5.9× the best classical fuel and holds 9.7 km sunward of L1. Without memory it cannot tell whether SRP is present, so it thrusts as if an average SRP were acting. Bias-LQR's Kalman filter solves exactly this; an RL agent with memory (frame stacking or LSTM) is the natural next step.
+- **Robustness has a price.** At k = 0, DR-PPO needs 5.9× the best classical fuel and holds 9.7 km sunward of L1. Without memory it cannot tell whether SRP is present, so it thrusts as if an average SRP were acting. Bias-LQR's Kalman filter solves exactly this; an RL agent with memory is the natural next step (phase 8: frame stacking fails; phase 9: an LSTM succeeds).
 
 ![Fuel/accuracy under model mismatch](figures/model_mismatch_pareto.png)
 
@@ -195,13 +195,25 @@ Turkish notes: [`docs/faz8_notlar.md`](docs/faz8_notlar.md). Raw results: `exper
 | JWST (L2, planned) | 2.43* | Dichmann et al. 2014 |
 | This work: cheapest classical (drifts ~220 km towards the SRP-shifted equilibrium) | 0.40 | |
 | This work: cheapest classical within 10 km | 1.85 | |
-| This work: DR-PPO / RES-PPO | 2.02 / 1.87 | |
+| This work: DR-PPO / RES-PPO / LSTM-PPO | 2.02 / 1.87 / 1.90 | |
 
 \* derived from the reported average burn size × 4 burns a year, or 25.5 m/s over 10.5 years (JWST). Holding L1 within 10 km costs more than a halo orbit mainly because the controller has to cancel the SRP push that a halo orbit absorbs into its shape.
 
 ![Flown missions vs this work](figures/mission_benchmark.png)
 
 With the Moon included (below), holding within 10 km costs 6.3 m/s per year and the cheapest classical design spends 1.3 m/s while drifting ~720 km: a halo orbit rides the Moon's periodic pull instead of cancelling it.
+
+**A recurrent policy (phase 9).** `scripts/16_lstm.py`: LSTM-PPO is DR-PPO with a 128-unit LSTM (sb3-contrib RecurrentPPO), same budget and seeds, trained on GitHub Actions (`.github/workflows/train-lstm.yml`). Δv ÷ best classical at the same accuracy, test seeds, mean of 5 seeds:
+
+| k | DR-PPO | MEM-PPO | LSTM-PPO | LSTM seeds not dominated |
+| --- | --- | --- | --- | --- |
+| 0 (holding) | 5.92 | 12.20 | 8.06 | 0/5 |
+| 0.5 | 1.095 | 1.332 | 1.008 | 2/5 |
+| 1 | 1.057 | 1.151 | 0.996 | 4/5 |
+| 2 | 1.028 | 1.071 | 0.998 | 4/5 |
+| 4 | 1.017 | 1.045 | 1.000 | 4/5 |
+
+So phase 8's memory failure was the architecture, not missing information. Limits: without SRP (k = 0) the LSTM spends 1.5× DR-PPO's fuel, and in recovery all 25 cases are dominated. Full table (incl. recovery) in the paper. Raw results: `experiments/phase9.csv`.
 
 **The Moon (phase 9).** The CR3BP's second body is split into the Earth and the Moon circling their barycentre (same total mass, so L1 stays put; circular coplanar lunar orbit). What is added is the tidal difference: ~1e-7 m/s² near L1 on average, up to 6e-7, oscillating mostly every 14.8 days. It is checked against a brute-force inertial integration with two bodies (< 1 m after 30 days). No phase 7–8 controller was built or trained with it. The classical side gets its textbook fix, **Harmonic-LQR** (a Kalman filter with oscillators at 1–3× the synodic rate, internal model principle); since that uses knowledge of the Moon, two RL families are also trained *with* the Moon on CI (DR-PPO-M; RES-PPO-M = residual on Harmonic-LQR).
 
@@ -212,6 +224,7 @@ Holding, test seeds, Δv ÷ cheapest classical design at least as accurate (mean
 | DR-PPO | 2.06 | 3.19 | 0/5 | 1.54 | 2.16 | 0/5 |
 | MEM-PPO | 1.22 | 1.55 | 0/5 | 1.16 | 1.27 | 0/5 |
 | RES-PPO | 1.01 | 1.31 | 0/5 | 1.00 | 1.09 | 0/5 |
+| LSTM-PPO | 1.84 | 2.26 | 0/5 | 1.46 | 1.54 | 0/5 |
 | DR-PPO-M (trained with the Moon) | 0.88 | 1.36 | 0/5 | 0.82 | 1.03 | **2/5** |
 | RES-PPO-M (trained with the Moon) | 0.79 | 0.98 | 0/5 | 0.93 | 0.98 | 3/5 |
 
@@ -273,7 +286,7 @@ make paper          # paper/main.pdf (needs LaTeX)
 | `13_memory_residual.py` | `experiments/phase8.csv`, `figures/phase8_pareto.png` (phase 8) |
 | `14_confirmation.py` | `experiments/confirmation*.csv` (phase 8, seeds 200–299) |
 | `15_frontier_search.py` | `experiments/frontier_search*.csv` (phase 8, dense classical search) |
-| `16_lstm.py` | `experiments/phase9.csv`, `figures/phase9_pareto.png` (phase 9, needs the LSTM models) |
+| `16_lstm.py` | `experiments/phase9.csv`, `figures/phase9_pareto.png` (phase 9, recurrent PPO) |
 | `17_mission_benchmark.py` | `experiments/mission_benchmark.csv`, `figures/mission_benchmark.png` (phase 9) |
 | `18_moon.py` | `experiments/moon*.csv`, `figures/moon_pareto.png` (phase 9, the Moon) |
 | `19_moon_frontier.py` | `experiments/moon_frontier*.csv` (phase 9, dense classical search under the Moon) |
