@@ -54,8 +54,10 @@ phase8:
 	$(PYTHON) $(S)/14_confirmation.py
 	$(PYTHON) $(S)/15_frontier_search.py
 
-# Phase 9: yearly delta-v vs. flown L1/L2 missions (seconds)
+# Phase 9: the Moon as unmodelled physics (~45 min on two cores), then the
+# yearly delta-v vs. flown L1/L2 missions (seconds)
 missions:
+	$(PYTHON) $(S)/18_moon.py
 	$(PYTHON) $(S)/17_mission_benchmark.py
 
 # Phase 6: every number and table in the paper, from experiments/*.csv

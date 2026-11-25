@@ -22,7 +22,7 @@ from ..constants import (ACCEL_UNIT_MPS2, AU_KM, MU_SUN_EARTH, TIME_UNIT_DAYS,
                          VELOCITY_UNIT_KMS)
 from ..dynamics import grad_potential
 from ..lagrange import lagrange_points
-from ..perturbations import mean_from_true, radius, rk4_er3bp, true_from_mean
+from ..perturbations import MOON_RATE, mean_from_true, radius, rk4_er3bp, true_from_mean
 
 KM = 1.0 / AU_KM                                  # 1 km in length units
 MPS = 1.0 / (VELOCITY_UNIT_KMS * 1000.0)          # 1 m/s in velocity units
@@ -206,7 +206,8 @@ class StationKeepingSim:
             n = max(1, math.ceil((f_end - self._f) / self.substep))
             self.state = np.array(rk4_er3bp(x, y, vx, vy, self.mu, p.e, p.a0,
                                             float(u[0] + d[0]), float(u[1] + d[1]),
-                                            self._f, f_end, n))
+                                            self._f, f_end, n, p.moon,
+                                            p.moon_phase0 + MOON_RATE * self.t))
             self._f = f_end
             self._r = radius(f_end, p.e)
         self.t += self.dt

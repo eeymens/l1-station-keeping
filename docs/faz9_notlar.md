@@ -2,10 +2,11 @@
 
 Faz 8'i okumadıysan önce `docs/faz8_notlar.md`'ye bak. Bu not onun devamı.
 
-Faz 9'da iki iş var:
+Faz 9'da üç iş var:
 
 1. **Gerçek görev kıyası** (`scripts/17_mission_benchmark.py`): Bulduğumuz yakıt değerleri gerçekçi mi?
 2. **LSTM'li PPO** (`scripts/16_lstm.py`): Faz 8'deki hafıza denemesi neden başarısız oldu, ağdan mı yoksa bilgiden mi?
+3. **Ay** (`scripts/18_moon.py`): Sabit olmayan, periyodik bir bozucu kuvvet. RL'in klasik tarafı geçebileceği ilk gerçekçi senaryo.
 
 ---
 
@@ -113,3 +114,67 @@ LSTM'li PPO, MLP'li PPO'dan ~10 kat yavaş: Bir seed için MLP ~25 dk sürerken 
 - **LSTM-PPO da DR-PPO'dan kötü ya da ona eşit çıkarsa:** Bilgi tek başına gürültülü gözlemlerden kolayca öğrenilemiyor (b). Bu durumda Faz 8'deki sonuç güçleniyor: En iyi yol klasik kestiriciyi (Kalman) tutup RL'e onun üstüne düzeltme öğretmek (RES-PPO).
 
 İki sonuç da raporda kullanılabilir. Negatif sonuç da bir sonuçtur, yeter ki deney adil olsun.
+
+---
+
+## 3. Ay: sabit olmayan bir bozucu
+
+### Soru
+
+Faz 7–8'in sonucu: SRP altında klasik taraf hep Pareto sınırında kaldı, çünkü SRP **neredeyse sabit** bir kuvvet ve Kalman filtresi (Bias-LQR) onu kolayca kestiriyor. Makalenin Tartışma bölümünde de şu iddia vardı: "RL, eksik fizik yavaş değişen bir sapma olarak özetlenemediğinde avantaj kazanabilir."
+
+Ay tam olarak böyle bir kuvvet. O zaman deneyelim.
+
+### Fizik: Ay'ı modele nasıl ekledik?
+
+Üç cisim modelinde (CR3BP) "Dünya" dediğimiz nokta aslında **Dünya + Ay'ı tek bir nokta kütle** olarak temsil ediyor. Gerçekte ise bunlar iki ayrı cisim ve ortak ağırlık merkezlerinin (barycenter) etrafında ayda bir kez dönüyorlar.
+
+Ay'ı eklerken şunu yaptık:
+- Modeldeki "Dünya" kütlesini (μ) ikiye böldük: Dünya (1 − q)μ ve Ay qμ, burada q = M_Ay / (M_Dünya + M_Ay) = 0.01215.
+- İkisini aralarında 384.400 km olacak şekilde ağırlık merkezinin etrafına yerleştirdik.
+- Dönen çerçevede Ay, Güneş–Dünya çizgisine göre her **29.53 günde** bir tur atıyor (sinodik ay).
+
+**Toplam kütle değişmiyor**, o yüzden L1 noktası yerinden oynamıyor. Eklenen şey sadece "iki ayrı cisim" ile "tek nokta kütle" arasındaki **fark**. Buna gelgit (tidal) ivmesi deniyor.
+
+**Büyüklüğü:** L1 civarında ortalama ~1×10⁻⁷ m/s², tepe değerde ~6×10⁻⁷ m/s². Kıyaslarsak SRP 0.6×10⁻⁷ m/s², itki sınırımız 10⁻⁶ m/s². Yani Ay, SRP'den daha güçlü ama itki sınırının altında kalıyor.
+
+**Şekli:** Kuvvet çoğunlukla **14.8 günlük** periyotla (sinodik ayın yarısı) salınıyor, küçük bir ortalama değeri de var. Gelgit kuvveti çift taraflı olduğu için ayda iki kez tepe yapıyor. Denizlerdeki gelgitin günde iki kez olmasının sebebi de bu.
+
+**Basitleştirmeler** (rapora yaz): Ay'ın yörüngesi çember ve ekliptik düzleminde kabul edildi. Gerçekte 5° eğik ve eksantrikliği 0.055.
+
+### Doğrulama
+
+`tests/test_perturbations.py` içindeki testler:
+- `test_moon_matches_inertial_integration`: **En önemli test bu.** Aynı uzay aracını, Dünya ve Ay'ı iki ayrı cisim olarak koyup, sabit (inertial) bir çerçevede `solve_ivp` ile kaba kuvvetle entegre ediyoruz. Bizim dönen/titreşen çerçevedeki entegratörümüzle 30 gün sonra **1 metreden az** fark var. Hem çember hem eliptik Dünya yörüngesi için geçiyor.
+- `test_moon_tidal_accel_matches_point_masses`: Formülü numpy vektörleriyle bağımsız olarak yeniden hesaplıyoruz, aynı sonuç çıkıyor.
+- `test_moon_keeps_total_mass_so_far_field_vanishes`: Uzakta kuvvet 1/R⁴ gibi sönüyor. Toplam kütle korunuyor demek bu (gelgit kuvveti).
+- `test_moon_off_is_the_old_code_path...`: Ay kapalıyken eski sonuçlar birebir aynı. Faz 1–8'in hiçbir sayısı değişmedi.
+
+**İlk düzeltme:** İlk versiyonda bir gün içinde zamanı "gerçek anomaliyle doğrusal" kabul etmiştim. Eliptik durumda inertial test 30 günde 2 m fark buldu. Fiziksel olarak önemsiz ama gerek yoktu, Kepler denklemiyle zamanı tam hesaplayacak şekilde düzelttim. Şimdi 1 m'nin altında.
+
+### Klasik tarafa da adil davranmak: Harmonic-LQR
+
+Faz 7'de SRP gelince klasik tarafa "ders kitabı çözümünü" (LQI, Bias-LQR) vermiştik. Ay için de aynısını yapıyoruz, yoksa karşılaştırma adil olmaz.
+
+Bias-LQR'nin Kalman filtresi kuvveti **sabit** kabul ediyor, o yüzden Ay'ın salınımını takip edemiyor. Ders kitabı çözümünün adı **iç model ilkesi** (internal model principle): Bozucunun frekansını biliyorsan, bu frekansı filtrenin içine koyarsın.
+
+Ay'ın periyodu önceden biliniyor, bilinmeyenler sadece genlik ve faz. **Harmonic-LQR** (`src/cr3bp/control/harmonic.py`) şunu yapıyor:
+- Kalman filtresi durumun yanında sabit kuvveti ve **sinodik frekansın 1., 2. ve 3. katlarında** birer salınıcıyı kestiriyor (eksen başına sabit + 3 × (cos, sin)).
+- Her salınım için en ucuz **periyodik** kararlı durumu hesaplıyor, LQR ile aynı Q, R ölçüsünü kullanarak. Yakıt pahalıysa aracı salınımla birlikte salındırıyor, ucuzsa salınımı itkiyle iptal ediyor.
+
+Testler (`tests/test_control.py`):
+- Harmonik sayısı sıfır olunca Bias-LQR ile birebir aynı sonuç veriyor.
+- Ay'ın kuvvetini kestirme hatası: Harmonic-LQR'de gerçek kuvvetin ~%22'si kadar, Bias-LQR'de ~%100. Yani Bias-LQR Ay'ı hiç takip edemiyor.
+
+### Deney
+
+Hiçbir kontrolcü Ay ile tasarlanmadı ya da eğitilmedi. Hepsi Ay'la burada **ilk kez** karşılaşıyor. RL ajanları da yeniden eğitilmedi.
+
+- Koşullar: "Moon" (sadece CR3BP + Ay) ve "k=1 + Moon" (gerçek eksantriklik, SRP ve Ay).
+- Klasik: LQR, LQI, Bias-LQR, Harmonic-LQR, her biri Faz 7'deki 115 (ρ, r_ref) tasarımıyla.
+- RL: DR-PPO, MEM-PPO, RES-PPO (ve hazır olunca LSTM-PPO), 5'er seed.
+- Test seed'leri 100–119, bir yıl.
+
+### Sonuçlar
+
+*(Deney bitince doldurulacak.)*

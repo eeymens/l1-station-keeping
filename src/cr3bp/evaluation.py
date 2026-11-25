@@ -26,18 +26,25 @@ SCENARIOS = {
 TEST_SEEDS = range(100, 120)
 
 
-def perturbation_for(k, seed, parts=("e", "srp")):
+def perturbation_for(k, seed, parts=("e", "srp"), moon=0.0):
     """Phase 7: the perturbation flown with episode seed `seed` at severity k.
 
     Earth's starting true anomaly is drawn from its own generator (seed + 7919),
     so the navigation and thrust errors stay identical draw for draw across
     controllers *and* across k. ``parts`` switches the two effects on
     individually. k = 0 returns None (original CR3BP code path).
+
+    Phase 9: ``moon`` > 0 adds the Moon (see `cr3bp.perturbations`), scaled by
+    ``moon``. Its starting angle comes from a third generator (seed + 104729),
+    so it changes none of the draws above.
     """
-    if k == 0:
+    if k == 0 and moon == 0:
         return None
     f0 = float(np.random.default_rng(seed + 7919).uniform(0.0, 2 * np.pi))
     p = Perturbation.from_k(k, f0=f0)
+    if moon:
+        p.moon = float(moon)
+        p.moon_phase0 = float(np.random.default_rng(seed + 104729).uniform(0.0, 2 * np.pi))
     if "e" not in parts:
         p.e = 0.0
     if "srp" not in parts:
@@ -46,7 +53,7 @@ def perturbation_for(k, seed, parts=("e", "srp")):
 
 
 def evaluate(controller, scenarios=SCENARIOS, seeds=range(5), days=365, noise=None,
-             perturbation_k=0.0, parts=("e", "srp")):
+             perturbation_k=0.0, parts=("e", "srp"), moon=0.0):
     """Fly `controller` on every scenario x seed. Returns a list of result rows.
 
     ``perturbation_k`` > 0 flies the phase-7 perturbed dynamics (see
@@ -56,7 +63,8 @@ def evaluate(controller, scenarios=SCENARIOS, seeds=range(5), days=365, noise=No
     for name, offset in scenarios.items():
         for seed in seeds:
             sim = StationKeepingSim(seed=seed, noise=noise,
-                                    perturbation=perturbation_for(perturbation_k, seed, parts))
+                                    perturbation=perturbation_for(perturbation_k, seed, parts,
+                                                                 moon))
             r = run_episode(sim, controller, days=days, offset_km=offset)
             d = r["dist_km"]
             rows.append({

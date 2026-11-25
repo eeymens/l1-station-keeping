@@ -199,3 +199,101 @@ def test_nominal_env_is_unchanged():
     env = L1StationKeepingEnv(action_type="continuous")
     env.reset(seed=0)
     assert env.sim.perturbation is None
+
+
+# ------------------------------------------------------------ phase 9: the Moon
+def _two_bodies_minus_one(X, Y, theta):
+    """Independent check of moon_tidal_accel with numpy vectors."""
+    from cr3bp.perturbations import EARTH_MOON_AU, Q_MOON
+    u = np.array([math.cos(theta), math.sin(theta)])
+    p = np.array([X, Y])
+    bodies = [((1 - Q_MOON) * MU, -Q_MOON * EARTH_MOON_AU * u),
+              (Q_MOON * MU, (1 - Q_MOON) * EARTH_MOON_AU * u)]
+    a = sum(-m * (p - b) / np.linalg.norm(p - b) ** 3 for m, b in bodies)
+    return a + MU * p / np.linalg.norm(p) ** 3
+
+
+@pytest.mark.parametrize("theta", [0.0, 0.7, 2.0, math.pi, 4.5])
+def test_moon_tidal_accel_matches_point_masses(theta):
+    from cr3bp.perturbations import moon_tidal_accel
+    X, Y = L1[0] - (1 - MU), 3e-4
+    assert np.allclose(moon_tidal_accel(X, Y, MU, theta), _two_bodies_minus_one(X, Y, theta),
+                       rtol=1e-9, atol=0.0)
+
+
+def test_moon_keeps_total_mass_so_far_field_vanishes():
+    """Same total mass as the point it replaces: no 1/R^2 term, so far away the
+    extra pull falls off at least as fast as 1/R^4 (tidal)."""
+    from cr3bp.perturbations import moon_tidal_accel
+    a1 = np.hypot(*moon_tidal_accel(0.01, 0.0, MU, 0.3))
+    a2 = np.hypot(*moon_tidal_accel(0.02, 0.0, MU, 0.3))
+    assert a2 < a1 / 12                                   # ~1/16 for a pure quadrupole
+
+
+def test_moon_near_l1_is_about_1e7_mps2():
+    from cr3bp.constants import ACCEL_UNIT_MPS2
+    from cr3bp.perturbations import moon_tidal_accel
+    X = L1[0] - (1 - MU)
+    a = np.array([moon_tidal_accel(X, 0.0, MU, t)
+                  for t in np.linspace(0, 2 * np.pi, 361)]) * ACCEL_UNIT_MPS2
+    peak = np.hypot(a[:, 0], a[:, 1]).max()
+    assert 1e-7 < peak < 1e-6                             # below the 1e-6 thrust limit
+
+
+def test_moon_off_is_the_old_code_path_and_moon_on_changes_the_orbit():
+    from cr3bp.control import StationKeepingSim, run_episode
+    from cr3bp.evaluation import perturbation_for
+    assert perturbation_for(0.0, 3) is None
+    p0, p1 = perturbation_for(1.0, 3), perturbation_for(1.0, 3, moon=1.0)
+    assert (p0.e, p0.srp_mps2, p0.f0) == (p1.e, p1.srp_mps2, p1.f0) and p1.moon == 1.0
+    r = [run_episode(StationKeepingSim(seed=3, perturbation=p), None, days=20)
+         for p in (p0, p1)]
+    assert r[0]["final_dist_km"] != r[1]["final_dist_km"]
+
+
+def test_moon_phase_turns_once_per_synodic_month():
+    from cr3bp.perturbations import MOON_RATE, SYNODIC_MONTH_DAYS
+    from cr3bp.constants import TIME_UNIT_DAYS
+    assert math.isclose(MOON_RATE * SYNODIC_MONTH_DAYS / TIME_UNIT_DAYS, 2 * math.pi)
+
+
+@pytest.mark.parametrize("e", [0.0, E_EARTH])
+def test_moon_matches_inertial_integration(e):
+    """Same spacecraft, integrated by brute force in an inertial frame with the
+    Earth and the Moon as two bodies circling their barycentre (which follows
+    the Kepler ellipse), vs. the pulsating integrator stepped day by day as the
+    simulator does."""
+    from cr3bp.constants import TIME_UNIT_DAYS
+    from cr3bp.perturbations import EARTH_MOON_AU, MOON_RATE, Q_MOON
+    pert = Perturbation(e=e, srp_mps2=SRP_DEFAULT_MPS2, moon=1.0, moon_phase0=1.1)
+    u = np.array([4e-7, -3e-7]) * MPS2
+    f0, s0 = 0.7, (L1[0] + 2000 * KM, 1500 * KM, 0.05 * MPS, -0.03 * MPS)
+    M0, dt, days = mean_from_true(f0, e), 1.0 / TIME_UNIT_DAYS, 30
+
+    s, f = s0, f0
+    for i in range(days):
+        f_next = true_from_mean(M0 + (i + 1) * dt, e)
+        s = rk4_er3bp(*s, MU, e, pert.a0, *u, f, f_next, 80, pert.moon,
+                      pert.moon_phase0 + MOON_RATE * i * dt)
+        f = f_next
+
+    def rhs(t, X):
+        fa = true_from_mean(M0 + t, e)
+        r = radius(fa, e)
+        Rse = r * np.array([math.cos(fa), math.sin(fa)])
+        sun, emb = -MU * Rse, (1 - MU) * Rse
+        th = fa + pert.moon_phase0 + MOON_RATE * t
+        um = np.array([math.cos(th), math.sin(th)])
+        earth = emb - Q_MOON * EARTH_MOON_AU * um
+        moon = emb + (1 - Q_MOON) * EARTH_MOON_AU * um
+        acc = -(1 - MU - pert.a0) * (X[:2] - sun) / np.linalg.norm(X[:2] - sun) ** 3
+        for m, b in (((1 - Q_MOON) * MU, earth), (Q_MOON * MU, moon)):
+            acc = acc - m * (X[:2] - b) / np.linalg.norm(X[:2] - b) ** 3
+        c, sn = math.cos(fa), math.sin(fa)
+        return np.r_[X[2:], acc + np.array([[c, -sn], [sn, c]]) @ u]
+
+    sol = solve_ivp(rhs, (0, days * dt), _pulsating_to_inertial(f0, s0, e), method="DOP853",
+                    rtol=1e-12, atol=1e-14)
+    X_puls = _pulsating_to_inertial(f, s, e)
+    assert np.linalg.norm(X_puls[:2] - sol.y[:2, -1]) * AU_KM < 1e-3        # < 1 m
+    assert np.linalg.norm(X_puls[2:] - sol.y[2:, -1]) / MPS < 1e-8          # < 10 nm/s

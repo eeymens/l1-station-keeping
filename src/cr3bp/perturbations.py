@@ -52,6 +52,22 @@ Timing: controllers still act once per *day* of physical time. Each interval
 [t, t + dt] is mapped to [f(t), f(t + dt)] with Kepler's equation and
 integrated in f with RK4.
 
+The Moon (phase 9)
+------------------
+The CR3BP's second body stands for the Earth *and* the Moon as one point
+mass. In reality they are two bodies circling their common barycentre once a
+month. `moon` > 0 splits the second body's mass mu into the Earth (1 - q) mu and
+the Moon q mu (q = M_moon / (M_earth + M_moon) = 0.01215), placed 384,400 km
+apart about the point (1 - mu, 0), in the ecliptic plane, turning at the
+synodic rate (one turn per 29.53 days in the rotating frame). The total mass
+stays mu, so the Lagrange points do not move: what is added is only the
+*difference* between two bodies and one point mass, a tidal acceleration of
+~1e-7 m/s^2 near L1 that oscillates with half the synodic period (14.8 days)
+around a small mean. Unlike SRP it is not a slowly varying bias, which is why
+it is interesting: a constant-disturbance estimator cannot capture it exactly.
+`moon` scales this acceleration (1 = real Moon). Simplifications: circular,
+coplanar lunar orbit (the real one is inclined by 5 deg and has e = 0.055).
+
 Observations and metrics: the navigation estimate a controller sees is the
 pulsating state relative to L1 (positions in AU-scaled pulsating units, and
 d/df velocities), which is what a controller designed in the CR3BP would use.
@@ -62,10 +78,21 @@ Delta-v is physical: integral of |thrust acceleration| dt.
 import math
 from dataclasses import dataclass
 
-from .constants import ACCEL_UNIT_MPS2
+from .constants import ACCEL_UNIT_MPS2, AU_KM, TIME_UNIT_DAYS
 
 #: Eccentricity of Earth's orbit (J2000 mean value).
 E_EARTH = 0.0167086
+
+#: Moon / (Earth + Moon) mass ratio (IAU: M_earth / M_moon = 81.30057).
+Q_MOON = 1.0 / (1.0 + 81.30057)
+
+#: Mean Earth-Moon distance, km, and the synodic month, days.
+EARTH_MOON_KM = 384_400.0
+SYNODIC_MONTH_DAYS = 29.530589
+
+#: The same in nondimensional units: AU, and rad per time unit in the rotating frame.
+EARTH_MOON_AU = EARTH_MOON_KM / AU_KM
+MOON_RATE = 2.0 * math.pi * TIME_UNIT_DAYS / SYNODIC_MONTH_DAYS
 
 #: Solar radiation pressure at 1 AU on a perfect absorber, N/m^2
 #: (solar flux 1367 W/m^2 divided by the speed of light; Montenbruck & Gill,
@@ -91,10 +118,14 @@ class Perturbation:
     e         : eccentricity of Earth's orbit (0 = circular CR3BP)
     srp_mps2  : SRP acceleration at 1 AU, m/s^2 (0 = no SRP)
     f0        : Earth's true anomaly at t = 0 (rad), i.e. where in the year we start
+    moon      : scale of the Moon's tidal acceleration (0 = off, 1 = real Moon), phase 9
+    moon_phase0 : angle of the Moon from the Sun-Earth line at t = 0 (rad)
     """
     e: float = 0.0
     srp_mps2: float = 0.0
     f0: float = 0.0
+    moon: float = 0.0
+    moon_phase0: float = 0.0
 
     @classmethod
     def from_k(cls, k, f0=0.0, srp_scale=1.0):
@@ -104,7 +135,7 @@ class Perturbation:
 
     @property
     def is_null(self):
-        return self.e == 0.0 and self.srp_mps2 == 0.0
+        return self.e == 0.0 and self.srp_mps2 == 0.0 and self.moon == 0.0
 
     @property
     def a0(self):
@@ -145,7 +176,27 @@ def radius(f, e):
 
 
 # ------------------------------------------------------------------ dynamics
-def er3bp_accel(f, x, y, vx, vy, mu, e, a0, ux, uy):
+def moon_tidal_accel(X, Y, mu, theta):
+    """Physical acceleration (nondimensional, AU and Sun+Earth GM = 1) of the
+    Earth-Moon pair minus that of one point mass mu at their barycentre.
+
+    (X, Y): physical position relative to the barycentre, AU. theta: angle of
+    the Moon from the Sun-Earth line. See the module docstring.
+    """
+    c, s = math.cos(theta), math.sin(theta)
+    ex, ey = -Q_MOON * EARTH_MOON_AU * c, -Q_MOON * EARTH_MOON_AU * s
+    mx, my = (1.0 - Q_MOON) * EARTH_MOON_AU * c, (1.0 - Q_MOON) * EARTH_MOON_AU * s
+    dex, dey = X - ex, Y - ey
+    dmx, dmy = X - mx, Y - my
+    re3 = (dex * dex + dey * dey) ** 1.5
+    rm3 = (dmx * dmx + dmy * dmy) ** 1.5
+    rb3 = (X * X + Y * Y) ** 1.5
+    ax = mu * (-(1.0 - Q_MOON) * dex / re3 - Q_MOON * dmx / rm3 + X / rb3)
+    ay = mu * (-(1.0 - Q_MOON) * dey / re3 - Q_MOON * dmy / rm3 + Y / rb3)
+    return ax, ay
+
+
+def er3bp_accel(f, x, y, vx, vy, mu, e, a0, ux, uy, moon=0.0, theta=0.0):
     """Planar ER3BP + SRP accelerations (d2x/df2, d2y/df2) in pulsating coordinates.
 
     (ux, uy) is the *physical* control/disturbance acceleration in
@@ -161,24 +212,47 @@ def er3bp_accel(f, x, y, vx, vy, mu, e, a0, ux, uy):
     r2 = math.sqrt(dx2 * dx2 + y2)
     k1 = (m1 - a0) / (r1 * r1 * r1)      # Sun gravity minus SRP
     k2 = mu / (r2 * r2 * r2)
+    if moon:
+        r = (1.0 - e * e) * w                      # Sun-Earth distance, AU
+        mx, my = moon_tidal_accel(r * dx2, r * y, mu, theta)
+        ux, uy = ux + moon * mx, uy + moon * my
     ax = 2.0 * vy + w * (x - k1 * dx1 - k2 * dx2) + g * ux
     ay = -2.0 * vx + w * (y - k1 * y - k2 * y) + g * uy
     return ax, ay
 
 
-def rk4_er3bp(x, y, vx, vy, mu, e, a0, ux, uy, f_start, f_end, n):
-    """n RK4 steps in true anomaly from f_start to f_end, constant (ux, uy)."""
+def rk4_er3bp(x, y, vx, vy, mu, e, a0, ux, uy, f_start, f_end, n,
+              moon=0.0, theta_start=0.0):
+    """n RK4 steps in true anomaly from f_start to f_end, constant (ux, uy).
+
+    Phase 9: with ``moon`` > 0 the Moon's angle is ``theta_start`` at f_start
+    and advances at the synodic rate in physical time, which is recovered
+    exactly from f with Kepler's equation (time = mean anomaly).
+    """
     h = (f_end - f_start) / n
     h2, h6 = h / 2.0, h / 6.0
+    m_start = mean_from_true(f_start, e)
+
+    def theta(fx):
+        if not moon:
+            return 0.0
+        dm = mean_from_true(fx, e) - m_start
+        dm -= 2.0 * math.pi * round(dm / (2.0 * math.pi))   # one interval is < half a year
+        return theta_start + MOON_RATE * dm
+
     f = f_start
     for _ in range(n):
-        a1x, a1y = er3bp_accel(f, x, y, vx, vy, mu, e, a0, ux, uy)
+        th, th2, th4 = theta(f), theta(f + h2), theta(f + h)
+        a1x, a1y = er3bp_accel(f, x, y, vx, vy, mu, e, a0, ux, uy, moon, th)
         v2x, v2y = vx + h2 * a1x, vy + h2 * a1y
-        a2x, a2y = er3bp_accel(f + h2, x + h2 * vx, y + h2 * vy, v2x, v2y, mu, e, a0, ux, uy)
+        a2x, a2y = er3bp_accel(f + h2, x + h2 * vx, y + h2 * vy, v2x, v2y, mu, e, a0, ux, uy,
+                               moon, th2)
         v3x, v3y = vx + h2 * a2x, vy + h2 * a2y
-        a3x, a3y = er3bp_accel(f + h2, x + h2 * v2x, y + h2 * v2y, v3x, v3y, mu, e, a0, ux, uy)
+        a3x, a3y = er3bp_accel(f + h2, x + h2 * v2x, y + h2 * v2y, v3x, v3y, mu, e, a0, ux, uy,
+                               moon, th2)
         v4x, v4y = vx + h * a3x, vy + h * a3y
-        a4x, a4y = er3bp_accel(f + h, x + h * v3x, y + h * v3y, v4x, v4y, mu, e, a0, ux, uy)
+        a4x, a4y = er3bp_accel(f + h, x + h * v3x, y + h * v3y, v4x, v4y, mu, e, a0, ux, uy,
+                               moon, th4)
         x += h6 * (vx + 2.0 * v2x + 2.0 * v3x + v4x)
         y += h6 * (vy + 2.0 * v2y + 2.0 * v3y + v4y)
         vx += h6 * (a1x + 2.0 * a2x + 2.0 * a3x + a4x)
