@@ -1,0 +1,47 @@
+name: train-lstm
+
+# Phase 9: train the recurrent (LSTM) PPO agents. One job per training seed,
+# run in parallel. An LSTM agent takes ~4 h on one core, too long for a laptop
+# session, so it runs here. Download the "ppo_lstm_s*" artifacts into the
+# repository root, then run scripts/16_lstm.py.
+
+on:
+  workflow_dispatch:
+    inputs:
+      steps:
+        description: "training steps per agent"
+        default: "3000000"
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [0, 1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install (CPU-only PyTorch)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e ".[dev,rl]"
+      - name: Train ppo_lstm_s${{ matrix.seed }}
+        run: >
+          python scripts/08_train_ppo.py --steps ${{ inputs.steps }} --seed ${{ matrix.seed }}
+          --dr-k-max 4 --eval-ks 0,1,2,4 --lstm 128 --max-minutes 330
+          --name ppo_lstm_s${{ matrix.seed }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ppo_lstm_s${{ matrix.seed }}
+          path: |
+            models/ppo_lstm_s${{ matrix.seed }}.*
+            experiments/ppo_lstm_s${{ matrix.seed }}_training.csv
+            figures/ppo_lstm_s${{ matrix.seed }}_learning_curve.png
+          if-no-files-found: warn

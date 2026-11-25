@@ -241,6 +241,8 @@ class PolicyController:
 
     def reset(self):
         self.builder.reset()
+        if hasattr(self.predict, "reset"):        # recurrent policies (phase 9)
+            self.predict.reset()
 
     def __call__(self, obs):
         return self.builder.act(self.predict(self.builder.observe(obs)))

@@ -177,3 +177,42 @@ def test_residual_zero_action_is_the_bias_lqr():
     a = run_episode(StationKeepingSim(seed=4), ctrl, days=100)
     b = run_episode(StationKeepingSim(seed=4), BiasLQRController(rho=1.0, u_max_mps2=1e-6), days=100)
     assert np.allclose(a["dist_km"], b["dist_km"], rtol=1e-12)
+
+
+# ------------------------------------------------------------ phase 9
+def _lstm_policy(tmp_path):
+    pytest.importorskip("sb3_contrib")
+    from sb3_contrib import RecurrentPPO
+    from cr3bp.training import load_policy, save_config
+
+    kw = {"action_type": "continuous", "action_power": 3.0, "dr_k_max": 4.0}
+    model = RecurrentPPO("MlpLstmPolicy", L1StationKeepingEnv(**kw), n_steps=64, batch_size=32,
+                         seed=0, policy_kwargs={"lstm_hidden_size": 8, "log_std_init": 1.0})
+    model.save(tmp_path / "lstm_test")
+    save_config(tmp_path / "lstm_test", "rppo", kw, {})
+    return load_policy(tmp_path, "lstm_test")
+
+
+def test_lstm_policy_round_trip(tmp_path):
+    env, ctrl = _lstm_policy(tmp_path)
+    obs = StationKeepingSim(noise=NoiseModel.none()).reset((100.0, 0.0))
+    ctrl.reset()
+    u = ctrl(obs)
+    assert u.shape == (2,) and math.hypot(*u) <= env.u_max * (1 + 1e-12)
+
+
+def test_lstm_state_carries_over_and_resets(tmp_path):
+    """The LSTM must remember within an episode and forget between episodes,
+    so two evaluations of the same seeds give identical results."""
+    env, ctrl = _lstm_policy(tmp_path)
+    f = env.features(StationKeepingSim(noise=NoiseModel.none()).reset((100.0, 0.0)))
+    pred = ctrl.predict                                     # the RecurrentPredictor
+    ctrl.reset()
+    first = [pred(f) for _ in range(3)]
+    assert not np.array_equal(first[0], first[2])          # same input, new memory
+    ctrl.reset()
+    assert np.array_equal(pred(f), first[0])               # reset forgets
+    from cr3bp.evaluation import evaluate
+    a = evaluate(ctrl, seeds=range(2), days=30, perturbation_k=1.0)
+    b = evaluate(ctrl, seeds=range(2), days=30, perturbation_k=1.0)
+    assert [r["dv_mps"] for r in a] == [r["dv_mps"] for r in b]

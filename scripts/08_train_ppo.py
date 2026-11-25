@@ -31,6 +31,12 @@ Phase 8 (same hyperparameters, same domain randomisation):
     --history 10          memory: last 10 observations and actions (ppo_mem_s*)
     --residual-rho 1      hybrid: correction on top of Bias-LQR (rho = 1), which
                           also passes its Kalman estimates to the agent (ppo_res_s*)
+
+Phase 9 (same hyperparameters, same domain randomisation):
+    --lstm 128            recurrent PPO (sb3-contrib RecurrentPPO): an LSTM with
+                          128 units in front of the same 128-128 heads. It sees
+                          only the current observation and must build its own
+                          memory (ppo_lstm_s*). Needs `pip install sb3-contrib`.
 """
 
 import argparse
@@ -39,12 +45,24 @@ from pathlib import Path
 
 import torch
 from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import BaseCallback, CallbackList
 from stable_baselines3.common.env_util import make_vec_env
 
 from cr3bp.envs import L1StationKeepingEnv
 from cr3bp.training import EvalCallback, save_config, save_training_log
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class WallClockStop(BaseCallback):
+    """End training at a wall-clock deadline (CI jobs have a time limit)."""
+
+    def __init__(self, deadline):
+        super().__init__()
+        self.deadline = deadline
+
+    def _on_step(self):
+        return time.time() < self.deadline
 
 
 def main():
@@ -68,6 +86,11 @@ def main():
                    help="phase 8: observation holds the last N feature vectors and actions")
     p.add_argument("--residual-rho", type=float, default=None,
                    help="phase 8: agent adds a correction to a Bias-LQR with this rho")
+    p.add_argument("--max-minutes", type=float, default=0.0,
+                   help="stop training after this much wall-clock time (0 = no limit); "
+                        "the best model so far is kept, the log records the last step")
+    p.add_argument("--lstm", type=int, default=0,
+                   help="phase 9: recurrent PPO with an LSTM of this many units")
     p.add_argument("--name", default="ppo_l1", help="output name for model, CSV and figure")
     args = p.parse_args()
     torch.set_num_threads(1)
@@ -85,20 +108,32 @@ def main():
     (ROOT / "models").mkdir(exist_ok=True)
     model_path = ROOT / "models" / args.name
 
-    model = PPO(
-        "MlpPolicy", env, seed=args.seed, verbose=0,
+    policy_kwargs = {"net_arch": {"pi": [128, 128], "vf": [128, 128]},
+                     "log_std_init": args.log_std_init}
+    if args.lstm:
+        from sb3_contrib import RecurrentPPO
+        algo, cls, policy = "rppo", RecurrentPPO, "MlpLstmPolicy"
+        policy_kwargs["lstm_hidden_size"] = args.lstm
+    else:
+        algo, cls, policy = "ppo", PPO, "MlpPolicy"
+    model = cls(
+        policy, env, seed=args.seed, verbose=0,
         learning_rate=args.lr, n_steps=args.n_steps, batch_size=256, n_epochs=10,
         gamma=args.gamma, gae_lambda=0.95, clip_range=0.2, ent_coef=0.0, max_grad_norm=0.5,
-        policy_kwargs={"net_arch": {"pi": [128, 128], "vf": [128, 128]},
-                       "log_std_init": args.log_std_init},
+        policy_kwargs=policy_kwargs,
     )
     eval_ks = tuple(float(k) for k in args.eval_ks.split(","))
     cb = EvalCallback(L1StationKeepingEnv(**env_kwargs), args.eval_every, model_path, ks=eval_ks)
     t0 = time.time()
-    model.learn(total_timesteps=args.steps, callback=cb)
+    callbacks = [cb]
+    if args.max_minutes > 0:
+        callbacks.append(WallClockStop(t0 + 60.0 * args.max_minutes))
+    model.learn(total_timesteps=args.steps, callback=CallbackList(callbacks))
+    if model.num_timesteps < args.steps:
+        print(f"Stopped by --max-minutes at {model.num_timesteps} of {args.steps} steps")
     print(f"Training took {(time.time() - t0) / 60:.1f} min; best score {cb.best:.2f}")
 
-    save_config(model_path, "ppo", env_kwargs, vars(args))
+    save_config(model_path, algo, env_kwargs, vars(args))
     (ROOT / "experiments").mkdir(exist_ok=True)
     save_training_log(cb.log, ROOT / "experiments" / f"{args.name}_training.csv",
                       ROOT / "figures" / f"{args.name}_learning_curve.png")

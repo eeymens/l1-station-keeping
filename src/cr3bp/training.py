@@ -22,6 +22,39 @@ from .evaluation import evaluate, summarize
 ALGOS = {"dqn": DQN, "ppo": PPO}
 
 
+class RecurrentPredictor:
+    """Deterministic action from a recurrent (LSTM) policy, one step at a time.
+
+    Carries the LSTM state through an episode; `reset` starts a new episode.
+    `PolicyController.reset` calls it, so `run_episode` flies the agent exactly
+    as it was trained (phase 9).
+    """
+
+    def __init__(self, model):
+        self.model = model
+        self.reset()
+
+    def reset(self):
+        self.state, self.start = None, np.ones((1,), dtype=bool)
+
+    def __call__(self, f):
+        a, self.state = self.model.predict(f, state=self.state, episode_start=self.start,
+                                           deterministic=True)
+        self.start = np.zeros((1,), dtype=bool)
+        return a
+
+
+def _recurrent_ppo():
+    from sb3_contrib import RecurrentPPO                 # optional dependency (phase 9)
+    return RecurrentPPO
+
+
+def make_predictor(algo, model):
+    if algo == "rppo":
+        return RecurrentPredictor(model)
+    return lambda f: model.predict(f, deterministic=True)[0]
+
+
 def score(summary):
     """One number to rank policies: survival first, then fuel, then accuracy."""
     s = 0.0
@@ -48,8 +81,8 @@ class EvalCallback(BaseCallback):
         if self.num_timesteps < self._next:
             return True
         self._next += self.every
-        ctrl = PolicyController(self.eval_env,
-                                lambda f: self.model.predict(f, deterministic=True)[0])
+        algo = "rppo" if self.model.__class__.__name__ == "RecurrentPPO" else "ppo"
+        ctrl = PolicyController(self.eval_env, make_predictor(algo, self.model))
         summs = {k: summarize(evaluate(ctrl, perturbation_k=k)) for k in self.ks}
         summ = summs[self.ks[0]]
         sc = float(np.mean([score(s) for s in summs.values()]))
@@ -88,8 +121,9 @@ def load_policy(model_dir, name):
     else:                                         # phase-4 models predate the sidecar
         cfg = {"algo": "dqn", "env": {}}
     env = L1StationKeepingEnv(**cfg["env"])
-    model = ALGOS[cfg["algo"]].load(model_dir / f"{name}.zip", device="cpu")
-    return env, PolicyController(env, lambda f: model.predict(f, deterministic=True)[0])
+    cls = _recurrent_ppo() if cfg["algo"] == "rppo" else ALGOS[cfg["algo"]]
+    model = cls.load(model_dir / f"{name}.zip", device="cpu")
+    return env, PolicyController(env, make_predictor(cfg["algo"], model))
 
 
 def save_training_log(log, csv_path, fig_path):
