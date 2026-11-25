@@ -177,4 +177,51 @@ Hiçbir kontrolcü Ay ile tasarlanmadı ya da eğitilmedi. Hepsi Ay'la burada **
 
 ### Sonuçlar
 
-*(Deney bitince doldurulacak.)*
+**Klasik taraf: Harmonic-LQR kazanıyor.** L1'in 10 km yakınında kalmanın yıllık maliyeti:
+
+| | Sadece Ay | k=1 + Ay |
+| --- | --- | --- |
+| Bias-LQR | 10.11 m/s | 10.52 m/s |
+| Harmonic-LQR | 4.97 m/s | 6.32 m/s |
+
+Ay'ın frekansını filtreye koymak maliyeti yarıya indiriyor. İç model ilkesi çalışıyor.
+
+**Ay'ı hiç görmemiş RL ajanları: hepsi domine edildi.** DR-PPO en iyi klasik yakıtın 3.19 katını harcıyor. Sürpriz şu: **Hafıza bu sefer işe yarıyor.** MEM-PPO (1.55×), DR-PPO'nun yarısı kadar yakıt harcıyor. SRP'de tam tersiydi. Açıklaması: Birkaç günde değişen bir kuvvet için son 10 günü görmek bilgi veriyor. Neredeyse sabit SRP için ise sadece gürültü ekliyordu.
+
+**Ay ile eğitilen ajanlar** (adil karşılaştırma bunlarla):
+
+| Tutma, test seed'leri | Ay'ı bilmeyen klasiğe göre | Tüm klasiklere göre | Domine edilmeyen (yoğun arama sonrası) |
+| --- | --- | --- | --- |
+| DR-PPO-M, sadece Ay | 0.88× | 1.36× | 0/5 |
+| DR-PPO-M, k=1 + Ay | 0.82× | 1.03× | **2/5** |
+| RES-PPO-M, sadece Ay | 0.79× | 0.98× | 0/5 |
+| RES-PPO-M, k=1 + Ay | 0.93× | 0.98× | 3/5 |
+
+- **RES-PPO-M** (Harmonic-LQR'nin üstüne residual): Yoğun aramadan sonra zarfın 1.000–1.006 katında. Faz 8'deki RES-PPO ile aynı desen: Sınıra ulaşıyor ama geçemiyor.
+- **DR-PPO-M** (sıfırdan öğrenen, Ay ile eğitilmiş): Ay'ı bilmeyen klasik tasarımlara göre **%9–31 daha az yakıt** harcıyor (0.69–0.91×). Bunu Ay'ın frekansını kimse ona söylemeden, sadece veriden öğrendi.
+- **En önemli sonuç:** DR-PPO-M'in 2 seed'i (2 ve 4), k=1 + Ay koşulunda Ay'ın frekansını bilen Harmonic-LQR'nin bile **sınırının altında** kalıyor: test seed'lerinde zarfın 0.983–0.986 katı.
+- **Doğrulama** (`scripts/19` ve `scripts/20`):
+  - Yoğun arama: Harmonic-LQR ve Bias-LQR, r_ref 10–1000 km × 41 ρ değeri, koşul başına 902 ek tasarım. 2 ajan hâlâ domine edilmiyor. 3. seed bu aramada domine edildi, o yüzden 3 değil 2 diyoruz.
+  - **100 yeni seed (200–299)**, çevredeki 538 klasik tasarımla: İki ajan da domine edilmiyor, zarfın 0.984–0.986 katında. Sonuç tutarlı.
+
+**Bu projenin ilk "RL klasik sınırın altında" sonucu.** Ama dürüst olmak lazım, sonuç dar:
+- 5 seed'in sadece 2'si,
+- sadece bir koşulda (k=1 + Ay), sadece tutmada,
+- gevşek takipte (L1'e 29 ve 170 km uzaklıkta),
+- kazanç en fazla **yılda 0.08 m/s**.
+- Toparlanma (recovery) senaryosunda 50 RL durumunun hepsi domine edildi.
+
+Faz 8'deki bootstrap güven aralığını burada hesaplamadık. Jüri sorarsa: "İki ayrı seed kümesinde (test ve 100 yeni seed) aynı sonuç çıktı, ama bootstrap aralığı hesaplamadık."
+
+### Nasıl yorumlanır? (Raporun ana mesajlarından biri olabilir)
+
+**RL'in avantajı modelleme zahmetinden tasarruf, daha iyi kontrol değil.**
+
+- Bozucu kuvveti bilmiyorsan ya da modellemesi zorsa RL bunu veriden öğreniyor ve Ay'ı bilmeyen bütün klasik tasarımları %10–30 farkla geçiyor.
+- Bozucuyu biliyorsan, klasik mühendis frekansı filtreye yazıyor (Harmonic-LQR, birkaç düzine satır kod) ve neredeyse aynı yere geliyor. Fark en fazla birkaç yüzde.
+
+Faz 7'deki tahmin de bununla doğrulanmış oldu: "RL, eksik fizik sabit bir sapma olarak özetlenemediğinde avantaj kazanabilir." Kısmen doğru çıktı: Avantaj var, ama küçük.
+
+### Gerçek görev kıyasına etkisi
+
+Ay eklenince 10 km içinde tutmanın maliyeti yılda **6.32 m/s**'ye çıkıyor. En ucuz klasik tasarım 1.30 m/s harcıyor ama L1'den ortalama ~720 km uzaklaşıyor. Gerçek görevler ise yılda 0.36–2.43 m/s harcıyor. Sebebi: Halo yörüngesi, Ay'ın ve Güneş'in periyodik çekimlerini **iptal etmiyor, onlarla birlikte salınıyor**. Noktanın kendisini tutmak bu yüzden birkaç kat pahalı. Jüriye bunu böyle anlat: "Ay olmadan aynı mertebedeyiz. Ay ile noktayı tutmak pahalılaşıyor, ki bu da gerçek görevlerin neden halo yörüngesi kullandığını açıklıyor."
