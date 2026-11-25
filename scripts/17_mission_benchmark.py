@@ -22,7 +22,9 @@ Mission values (yearly station-keeping delta-v, m/s):
 
 Our values come from the committed CSVs (test seeds 100-119, one year, holding
 scenario): the cheapest classical design overall and the cheapest one that
-stays within 10 km of L1 (scripts/12), and the RL families (scripts/13, 16).
+stays within 10 km of L1 (scripts/12), the RL families (scripts/13, 16), and
+the same two classical rows with the Moon added (scripts/18), since the flown
+missions of course have the Moon too.
 
 Writes experiments/mission_benchmark.csv and figures/mission_benchmark.png.
 
@@ -84,6 +86,20 @@ def ours():
                     "mean_dist_km": float(r["mean_dist_km"]),
                     "how": "mean of 5 training seeds", "orbit": "hold a point",
                     "reference": "scripts/13" if fname == "phase8.csv" else "scripts/16"})
+    # phase 9: with the Moon too (scripts/18), as the flown missions are
+    mo = [r for r in read("moon_classical.csv")
+          if r["condition"] == "k=1 + Moon" and r["scenario"] == "holding"
+          and float(r["survival"]) == 1.0]
+    mo.sort(key=lambda r: float(r["dv_mps"]))
+    for label, r in (("classical, cheapest", mo[0]),
+                     (f"classical, cheapest within {TIGHT_KM:g} km",
+                      next(r for r in mo if float(r["mean_dist_km"]) <= TIGHT_KM))):
+        out.append({"source": "this work", "name": label, "years": f"k = {K:g} + Moon",
+                    "dv_per_year_mps": float(r["dv_mps"]),
+                    "mean_dist_km": float(r["mean_dist_km"]),
+                    "how": f"{r['family']}, rho = {float(r['rho']):g}, "
+                           f"r_ref = {float(r['r_ref_km']):.0f} km",
+                    "orbit": "hold a point", "reference": "scripts/18"})
     return out
 
 

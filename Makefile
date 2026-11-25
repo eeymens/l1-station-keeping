@@ -6,7 +6,8 @@
 #                    trained models in models/ (~3 h on one core, most of it
 #                    the phase-7 and phase-8 classical sweeps)
 #   make paper       build paper/main.pdf (needs a LaTeX distribution)
-#   make train       retrain every RL agent from scratch (~8 h on one core;
+#   make train       retrain every RL agent from scratch (~13 h on one core,
+#                    plus ~20 h for the five LSTM agents;
 #                    results will differ slightly from the committed models)
 #
 # Run `make -n <target>` to see the commands without running them.
@@ -54,10 +55,14 @@ phase8:
 	$(PYTHON) $(S)/14_confirmation.py
 	$(PYTHON) $(S)/15_frontier_search.py
 
-# Phase 9: the Moon as unmodelled physics (~45 min on two cores), then the
-# yearly delta-v vs. flown L1/L2 missions (seconds)
+# Phase 9: the Moon as unmodelled physics (~45 min on two cores) and a dense
+# classical frontier search under it (~45 min) with a fresh-seed check (~30 min),
+# then the yearly delta-v vs.
+# flown L1/L2 missions (seconds)
 missions:
 	$(PYTHON) $(S)/18_moon.py
+	$(PYTHON) $(S)/19_moon_frontier.py
+	$(PYTHON) $(S)/20_moon_confirmation.py
 	$(PYTHON) $(S)/17_mission_benchmark.py
 
 # Phase 6: every number and table in the paper, from experiments/*.csv
@@ -89,4 +94,15 @@ train:
 			--eval-ks 0,1,2,4 --history 10 --name ppo_mem_s$$seed; \
 		$(PYTHON) $(S)/08_train_ppo.py --steps 3000000 --seed $$seed --dr-k-max 4 \
 			--eval-ks 0,1,2,4 --residual-rho 1 --name ppo_res_s$$seed; \
+		$(PYTHON) $(S)/08_train_ppo.py --steps 3000000 --seed $$seed --dr-k-max 4 \
+			--eval-ks 0,1,2,4 --dr-moon-max 2 --eval-moons 0,1 --name ppo_drm_s$$seed; \
+		$(PYTHON) $(S)/08_train_ppo.py --steps 3000000 --seed $$seed --dr-k-max 4 \
+			--eval-ks 0,1,2,4 --dr-moon-max 2 --eval-moons 0,1 --residual-rho 1 \
+			--residual-base harmonic --name ppo_resm_s$$seed; \
+	done
+	# phase 9 LSTM agents: ~4 h each on one core (we trained them on CI,
+	# .github/workflows/train-lstm.yml)
+	for seed in 0 1 2 3 4; do \
+		$(PYTHON) $(S)/08_train_ppo.py --steps 3000000 --seed $$seed --dr-k-max 4 \
+			--eval-ks 0,1,2,4 --lstm 128 --name ppo_lstm_s$$seed; \
 	done

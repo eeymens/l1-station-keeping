@@ -57,7 +57,14 @@ PPO a memory of past observations does not help, but residual RL on top of the
 disturbance-estimating LQR reaches the classical Pareto frontier: on 100 fresh
 seeds and after a dense search of the classical design space, no classical
 design dominates it, although its advantage is at most \peFsMarginMax\,\%.
-Code and data are open source.
+The Moon, whose pull near $L_1$ oscillates instead of staying constant, is
+where learning gains most: PPO trained with it spends
+\moDrmAgnMin--\moDrmAgnMax$\times$ the fuel of classical controllers that do
+not model the Moon, and two of five training seeds stay
+\moConfEnvMin--\moConfEnvMax$\times$ the frontier even of a classical
+controller that models its frequency, on fresh seeds as well. The margin over
+that controller is small, so we read RL's advantage as saved modelling effort
+rather than better control. Code and data are open source.
 \end{abstract}
 
 % ===========================================================================
@@ -168,6 +175,19 @@ fixes the season ($f$ at $t = 0$) from a separate random stream, so the
 navigation and thrust errors stay identical across controllers and across $k$.
 A brute-force integration in an inertial frame, with the Sun and the Earth on
 Kepler ellipses, agrees with \eqref{eq:er3bp} to better than 1~m after 30 days.
+
+\paragraph{The Moon.} The second body of \eqref{eq:cr3bp} stands for the Earth
+and the Moon as one point mass. Section~\ref{sec:moon} splits it into the two
+bodies, $(1-q)\mu$ and $q\mu$ with $q = M_\text{Moon}/(M_\text{Earth} +
+M_\text{Moon}) = 0.0122$, placed 384\,400~km apart about the point $(1-\mu, 0)$
+and turning once per synodic month (29.53 days) in the rotating frame
+(circular, coplanar lunar orbit). The total mass is unchanged, so the Lagrange
+points do not move; what is added is the tidal difference between two bodies
+and one, about $10^{-7}$~m/s$^2$ on average near $L_1$ and up to
+$6\times10^{-7}$~m/s$^2$, mostly at half the synodic period. Unlike SRP it is
+not a slowly varying bias. It enters \eqref{eq:er3bp} like the thrust, through
+$g$. An inertial integration with the Earth and the Moon as separate bodies
+agrees to better than 1~m after 30 days, for $e = 0$ and $e = \eEarth$.
 
 \subsection{Lagrange points and linear stability}
 
@@ -291,6 +311,19 @@ families keep the nominal CR3BP model. Under strong mismatch the tightest
 tracking of the $r_\text{ref} = 1000$~km design is limited by the velocity
 weight rather than by $\rho$, so we sweep $r_\text{ref} \in \{1000, 100,
 10\}$~km as well, \mmDesigns\ designs in total.
+
+For the Moon (Section~\ref{sec:moon}) we add the textbook fix for a disturbance
+of known frequency, the internal model principle \cite{francis1976}.
+\emph{Harmonic-LQR} is Bias-LQR with a disturbance model of a constant plus
+one oscillator per axis at 1, 2 and 3 times the synodic rate $\omega_s$
+(amplitudes and phases unknown, estimated by the same Kalman filter). For an
+oscillator with complex amplitude $\mathbf{Z}$ at frequency $\omega$, the
+cheapest periodic steady state of the linear model in the LQR metric is
+$\mathbf{U} = -(T^{H} Q T + R)^{-1} T^{H} Q T\,\mathbf{Z}$,
+$\mathbf{X} = T(\mathbf{U} + \mathbf{Z})$ with $T = (zI - A_d)^{-1} B_d$ and
+$z = e^{i\omega\Delta t}$; the controller regulates around the sum of these
+steady states. Without oscillators it is exactly Bias-LQR (a unit test checks
+this).
 
 \subsection{Reinforcement learning environment}
 
@@ -692,6 +725,66 @@ along the Bias-LQR frontier; MEM-PPO scatters above it.}
 \label{fig:phase8}
 \end{figure}
 
+\subsection{The Moon: a disturbance that is not a bias}
+\label{sec:moon}
+
+Under SRP the classical side stayed on the frontier because a constant-force
+estimator captures an almost constant push. The Moon (Section~\ref{sec:mismatch-model})
+is different: near $L_1$ its tidal pull oscillates with half the synodic
+period and is larger than SRP. We fly two conditions, the CR3BP plus the Moon
+(``Moon'') and $k = 1$ plus the Moon, on the test seeds. No controller of
+Sections~\ref{sec:mismatch}--\ref{sec:phase8} was designed or trained with
+the Moon. The classical side is swept as before (\moDesigns\ designs over
+LQR, LQI, Bias-LQR and Harmonic-LQR), and because Harmonic-LQR is built
+\emph{knowing} the Moon's frequency, we also trained two RL families with the
+Moon in the domain randomisation (scale $\sim U(0, 2)$, random phase; same
+hyperparameters and five seeds each): \emph{DR-PPO-M}, and \emph{RES-PPO-M},
+a residual agent on Harmonic-LQR.
+
+\begin{table}[t]
+\centering
+\caption{The Moon, holding, test seeds: $\dv$ divided by that of the cheapest
+classical design at least as accurate, among the Moon-agnostic families (LQR,
+LQI, Bias-LQR) and among all four (with Harmonic-LQR), coarse sweep, mean
+$\pm$ std over 5 training seeds; and the seeds that no classical design
+dominates after the dense search. $^{\dagger}$Trained with the Moon.}
+\label{tab:moon}
+\small
+\input{generated/tab_moon}
+\end{table}
+
+\paragraph{The classical fix works.} Harmonic-LQR leads the classical side:
+staying within 10~km of $L_1$ costs it \moHarmTenOnly~m/s per year under the
+Moon alone (\moHarmTenKone~m/s at $k = 1$), against \moBiasTenOnly\ and
+\moBiasTenKone~m/s for Bias-LQR, whose filter chases a force it models as
+constant.
+
+\paragraph{Agents that never saw the Moon are all dominated}
+(Table~\ref{tab:moon}). DR-PPO spends \moDrAllOnly$\times$ the best classical
+fuel under the Moon alone. Memory now helps: MEM-PPO, worse than DR-PPO under
+SRP, spends half as much here (\moMemAllOnly$\times$), since a stack of past
+observations is informative about a force that changes within days.
+
+\paragraph{Agents trained with the Moon.} RES-PPO-M is not dominated by the
+coarse sweep in any holding case, but a dense search of Harmonic-LQR and
+Bias-LQR (\moDenseDesigns\ more designs per condition, $r_\text{ref}$ from 10
+to 1000~km $\times$ 41 values of $\rho$) puts all its seeds at
+\moResmEnvMin--\moResmEnvMax$\times$ the envelope: like RES-PPO under SRP, it
+reaches the frontier without moving it. DR-PPO-M, learning from scratch,
+spends \moDrmAgnMin--\moDrmAgnMax$\times$ the fuel of the best Moon-agnostic
+classical design at equal accuracy at $k = 1$, i.e.\ it learned from data
+what the agnostic designs miss. Against Harmonic-LQR, \moDrmDenseNd\ of its
+\moDrmDenseOf\ seed/condition cases remain undominated after the dense search,
+both at $k = 1$ + Moon, at \moDrmDenseEnvMin--\moDrmDenseEnvMax$\times$ the
+envelope. On 100 fresh seeds (200--299) against the \moConfDesigns\ dense
+designs near them, both stay undominated at
+\moConfEnvMin--\moConfEnvMax$\times$ the envelope, holding
+\moConfDistMin--\moConfDistMax~km from $L_1$. \textbf{This is the first
+learned controller in the study that is below the classical frontier on
+fresh seeds}, but the result is narrow: two of five training seeds, one
+condition, loose tracking, and a saving of at most \moConfSaveMax~m/s per
+year. In recovery, \moRecNd\ of the \moRecOf\ RL seed/condition cases are undominated.
+
 \subsection{Plausibility check against flown missions}
 \label{sec:missions}
 
@@ -707,7 +800,12 @@ magnitude, and it agrees. The flown missions spend
 \msLooseDv~m/s while drifting a mean \msLooseDist~km towards the SRP-shifted
 equilibrium; staying within 10~km of $L_1$ costs \msTightDv~m/s, most of it to
 cancel the SRP push that a real halo orbit simply absorbs into its shape. The
-learned controllers fall in the same range. A practical lesson from the
+learned controllers fall in the same range. The flown missions also feel the
+Moon; with it (Section~\ref{sec:moon}) the cheapest classical design spends
+\msMoonLooseDv~m/s while drifting \msMoonLooseDist~km, and holding within
+10~km costs \msMoonTightDv~m/s. A halo orbit is shaped so that it rides the
+Moon's and the Sun's periodic pulls rather than cancelling them, which is why
+holding the point itself costs several times more. A practical lesson from the
 missions also matches our setting: the cost of correcting a libration-point
 orbit grows exponentially with the time since the last manoeuvre (doubling in
 about 16 days \cite{roberts2011}), which is why a daily continuous thrust, as
@@ -716,7 +814,7 @@ in our model, is cheap compared with burns months apart.
 \begin{table}[t]
 \centering
 \caption{Yearly station-keeping $\dv$ of flown missions and of this work at
-$k = 1$ (holding, test seeds). $^{*}$Derived: average burn size $\times$ four
+$k = 1$, without and with the Moon (holding, test seeds). $^{*}$Derived: average burn size $\times$ four
 burns a year (SOHO 0.09, WIND 0.17~m/s per burn), or the planned 25.5~m/s over
 10.5 years (JWST). Different tasks: compare orders of magnitude only.}
 \label{tab:missions}
@@ -770,6 +868,16 @@ on a trusted classical controller is easy to certify, since a zero action
 recovers the classical one), but it is not evidence that RL beats classical
 control here.
 
+\paragraph{When RL helps.} The Moon is the case the previous paragraph
+anticipated, and it partly confirms it. Against classical controllers that do
+not model the Moon, an agent trained with it saves 10--30\,\% of the fuel at
+equal accuracy, without anyone writing down the Moon's frequency. But the
+classical engineer who does write it down (Harmonic-LQR, a few dozen lines)
+gets back to the frontier, and the RL margin over that controller is at most
+a few per cent. Our reading is that RL's advantage here is the cost of
+modelling, not the quality of control: it pays when the disturbance is
+unknown or hard to model, and shrinks when it is known.
+
 \paragraph{Limitations.}
 \label{sec:limits}
 The problem is planar and holds the point itself, not a halo or Lissajous
@@ -777,9 +885,9 @@ orbit, so the absolute $\dv$ values can be compared with real missions only in
 order of magnitude (Section~\ref{sec:missions}).
 Thrust is a small continuous push updated daily, rather than impulsive
 manoeuvres weeks apart. The unmodelled physics
-of Section~\ref{sec:mismatch} is limited to the eccentricity and SRP; the Moon,
-the planets and a full ephemeris model are not included, and the SRP
-area-to-mass ratio is an assumption. The RL reward and the LQR cost are different
+is limited to the eccentricity, SRP and a circular, coplanar Moon; the
+planets, the Moon's inclination and eccentricity, and a full ephemeris model
+are not included, and the SRP area-to-mass ratio is an assumption. The RL reward and the LQR cost are different
 functions, which is why we compare on the measured fuel--accuracy plane
 instead. Finally, we tuned the RL hyperparameters only lightly; better tuning
 could narrow the gap, but the agents would still have to beat a controller that
@@ -800,7 +908,10 @@ PPO agent comes within \mmDrHoldMin--\mmDrHoldMax$\times$ of the best classical
 fuel. Classical controllers with integral action or a disturbance estimator
 still dominate it, and Earth's eccentricity has almost no effect on holding the
 point. A residual PPO correction on that estimator reaches, but does not
-meaningfully move, the classical frontier. Natural next steps are halo-orbit
+meaningfully move, the classical frontier. Under the Moon's periodic pull,
+PPO trained with the Moon beats every classical design that does not model it
+and, in two of five seeds, edges slightly below the frontier of one that does.
+Natural next steps are halo-orbit
 station-keeping in three dimensions (where the eccentricity matters), recurrent
 RL policies that can infer unmodelled forces, and residual RL in settings where
 the linearisation itself fails, such as large halo orbits, where a learned

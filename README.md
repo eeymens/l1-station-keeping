@@ -10,7 +10,7 @@ The Sun–Earth L1 point sits about 1.49 million km sunward of Earth. It is an e
 
 **Phase 8: give RL the missing information.** A memory of the last 10 observations makes PPO *worse*. A residual PPO correction on top of the Kalman bias-estimating LQR is the first learned controller that is **not dominated**: on 100 fresh seeds and after a dense search of 1,011 classical designs per severity, no classical design beats it while holding under SRP. Its edge is at most 0.6 % (≤ 0.01 m/s per year), though, so RL *reaches* the classical frontier rather than moving it.
 
-**Phase 9: reality check and a recurrent policy.** With real eccentricity and SRP, our controllers spend 0.4–2 m/s per year, the same range as the flown L1/L2 missions SOHO, ACE, WIND and JWST (0.36–2.43 m/s per year). A recurrent (LSTM) PPO tests whether phase 8's memory failure was the network or the information *(training on CI, results pending)*.
+**Phase 9: the Moon, a reality check and a recurrent policy.** The Moon's pull near L1 *oscillates* (mostly every 14.8 days) instead of staying constant, the case where RL was expected to gain. A classical controller that models the Moon's known frequency (Harmonic-LQR, internal model principle) leads the classical side. PPO trained with the Moon spends 0.69–0.91× the fuel of classical controllers that do *not* model it, and 2 of 5 training seeds stay **1.4–1.6 % below the frontier even of Harmonic-LQR, confirmed on 100 fresh seeds** — the first learned controller below the classical frontier in this study, though narrowly (≤ 0.08 m/s per year). Our fuel costs are also in the range of flown L1/L2 missions (SOHO, ACE, WIND, JWST). A recurrent (LSTM) PPO tests whether phase 8's memory failure was the network or the information *(training on CI, results pending)*.
 
 📄 **Paper draft:** [`paper/main.pdf`](paper/main.pdf) · **Reproduce everything:** `make reproduce` (see [Reproducing the results](#reproducing-the-results))
 
@@ -30,7 +30,7 @@ The Sun–Earth L1 point sits about 1.49 million km sunward of Earth. It is an e
 | 6 | Paper draft (numbers generated from the CSVs), one-command reproduction, CI | Done |
 | 7 | Model mismatch: elliptic Earth orbit + solar radiation pressure, LQI and Kalman bias-estimating LQR, domain-randomised PPO (5 seeds) | Done |
 | 8 | RL with memory and residual RL on Bias-LQR (5 seeds each), confirmation on fresh seeds and a dense classical frontier search | Done |
-| 9 | Plausibility check against flown missions; recurrent (LSTM) PPO, 5 seeds | Benchmark done, LSTM training |
+| 9 | The Moon (Harmonic-LQR, RL trained with the Moon, dense search, fresh-seed confirmation); plausibility check against flown missions; recurrent (LSTM) PPO, 5 seeds | Moon and benchmark done, LSTM training |
 
 ## Results
 
@@ -201,6 +201,31 @@ Turkish notes: [`docs/faz8_notlar.md`](docs/faz8_notlar.md). Raw results: `exper
 
 ![Flown missions vs this work](figures/mission_benchmark.png)
 
+With the Moon included (below), holding within 10 km costs 6.3 m/s per year and the cheapest classical design spends 1.3 m/s while drifting ~720 km: a halo orbit rides the Moon's periodic pull instead of cancelling it.
+
+**The Moon (phase 9).** The CR3BP's second body is split into the Earth and the Moon circling their barycentre (same total mass, so L1 stays put; circular coplanar lunar orbit). What is added is the tidal difference: ~1e-7 m/s² near L1 on average, up to 6e-7, oscillating mostly every 14.8 days. It is checked against a brute-force inertial integration with two bodies (< 1 m after 30 days). No phase 7–8 controller was built or trained with it. The classical side gets its textbook fix, **Harmonic-LQR** (a Kalman filter with oscillators at 1–3× the synodic rate, internal model principle); since that uses knowledge of the Moon, two RL families are also trained *with* the Moon on CI (DR-PPO-M; RES-PPO-M = residual on Harmonic-LQR).
+
+Holding, test seeds, Δv ÷ cheapest classical design at least as accurate (mean of 5 seeds), and seeds not dominated after a dense search (`scripts/19`, 902 extra designs per condition):
+
+| | Moon: × Moon-agnostic classical | × all classical | not dom. | k = 1 + Moon: × agnostic | × all | not dom. |
+| --- | --- | --- | --- | --- | --- | --- |
+| DR-PPO | 2.06 | 3.19 | 0/5 | 1.54 | 2.16 | 0/5 |
+| MEM-PPO | 1.22 | 1.55 | 0/5 | 1.16 | 1.27 | 0/5 |
+| RES-PPO | 1.01 | 1.31 | 0/5 | 1.00 | 1.09 | 0/5 |
+| DR-PPO-M (trained with the Moon) | 0.88 | 1.36 | 0/5 | 0.82 | 1.03 | **2/5** |
+| RES-PPO-M (trained with the Moon) | 0.79 | 0.98 | 0/5 | 0.93 | 0.98 | 3/5 |
+
+- **Memory helps here.** MEM-PPO, worse than DR-PPO under SRP, needs half its fuel under the Moon.
+- **RES-PPO-M sits on the frontier** (1.000–1.006× the dense envelope), the phase 8 pattern again.
+- **DR-PPO-M seeds 2 and 4 are below it**: 0.983–0.986× the dense envelope on test seeds, 0.984–0.986× on 100 fresh seeds (`scripts/20`, 538 nearby designs), at 29 and 170 km from L1. Narrow (2 of 5 seeds, one condition, ≤ 0.08 m/s per year), but the first such result here.
+- Recovery: all 50 RL cases are dominated.
+
+Reading: RL's advantage under the Moon is mostly the modelling it saves — it beats every classical design that ignores the Moon without anyone writing down its frequency; once the classical side models it, the gap is a few per cent at most.
+
+![The Moon](figures/moon_pareto.png)
+
+Turkish notes: [`docs/faz9_notlar.md`](docs/faz9_notlar.md).
+
 **Current simplifications.** The spacecraft holds the L1 point itself; real missions fly halo or Lissajous orbits around it (to keep the Sun out of the antenna beam). Motion is planar, and thrust is a low, continuous push updated daily rather than impulsive burns weeks apart. These are deliberate, so LQR and RL are compared on identical, controlled conditions.
 
 ## The model
@@ -225,12 +250,12 @@ Velocity Verlet is not used because the Coriolis term depends on velocity, which
 git clone https://github.com/eeymens/l1-station-keeping.git
 cd l1-station-keeping
 make install        # pip install -e ".[dev,rl]"  (CPU-only PyTorch is enough)
-make test           # pytest, 65 tests
+make test           # pytest, 83 tests
 make reproduce      # every figure, CSV and paper number from the trained models (~4 h on two cores, mostly the phase-7/8 classical sweeps)
 make paper          # paper/main.pdf (needs LaTeX)
 ```
 
-`make reproduce` evaluates the trained agents in `models/`; it does not retrain them. Re-running it on the committed models reproduces the CSVs in `experiments/` exactly. `make train` retrains all 23 agents from scratch (~8 h on one core); PyTorch's nondeterminism across machines means retrained agents will differ slightly from the committed ones. `make -n <target>` prints the individual commands, one script per figure:
+`make reproduce` evaluates the trained agents in `models/`; it does not retrain them. Re-running it on the committed models reproduces the CSVs in `experiments/` exactly. `make train` retrains all 38 agents from scratch (~13 h on one core, plus ~20 h for the five LSTM agents, which we trained on CI); PyTorch's nondeterminism across machines means retrained agents will differ slightly from the committed ones. `make -n <target>` prints the individual commands, one script per figure:
 
 | Script | Output |
 | --- | --- |
@@ -250,6 +275,9 @@ make paper          # paper/main.pdf (needs LaTeX)
 | `15_frontier_search.py` | `experiments/frontier_search*.csv` (phase 8, dense classical search) |
 | `16_lstm.py` | `experiments/phase9.csv`, `figures/phase9_pareto.png` (phase 9, needs the LSTM models) |
 | `17_mission_benchmark.py` | `experiments/mission_benchmark.csv`, `figures/mission_benchmark.png` (phase 9) |
+| `18_moon.py` | `experiments/moon*.csv`, `figures/moon_pareto.png` (phase 9, the Moon) |
+| `19_moon_frontier.py` | `experiments/moon_frontier*.csv` (phase 9, dense classical search under the Moon) |
+| `20_moon_confirmation.py` | `experiments/moon_confirmation*.csv` (phase 9, seeds 200–299) |
 | `11_paper_assets.py` | `paper/generated/` — every number and table in the paper |
 
 Package versions verified to reproduce the committed results: [`requirements-lock.txt`](requirements-lock.txt).

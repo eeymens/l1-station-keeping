@@ -925,6 +925,106 @@ def phase8_figure():
     plt.close(fig)
 
 
+# ---------------------------------------------------------------- 9. the Moon
+MOON_FAMS = ("DR-PPO", "MEM-PPO", "RES-PPO", "LSTM-PPO", "DR-PPO-M", "RES-PPO-M")
+AGNOSTIC = ("LQR", "LQI", "Bias-LQR")
+
+
+def moon():
+    """Phase 9 (scripts/18, 19): the Moon as unmodelled physics."""
+    rows = load("moon.csv")
+    dense = {(r["condition"], r["family"], r["train_seed"]): r
+             for r in load("moon_frontier.csv")} if (EXP / "moon_frontier.csv").exists() else {}
+    cls = load("moon_classical.csv")
+    conds = ("Moon", "k=1 + Moon")
+    f = lambda r, k: float(r[k])  # noqa: E731
+    seeds = lambda fam, c, scen: [r for r in rows if r["family"] == fam  # noqa: E731
+                                  and r["condition"] == c and r["scenario"] == scen
+                                  and r["train_seed"] not in ("mean", "std", "-1")]
+    fams = [fam for fam in MOON_FAMS if seeds(fam, conds[0], "holding")]
+    macro("moDesigns", str(len({(r["family"], r["r_ref_km"], r["rho"]) for r in cls})))
+    macro("moDenseDesigns", str(len({(r["family"], r["r_ref_km"], r["rho"])
+                                     for r in load("moon_frontier_designs.csv")}))
+          if dense else "0")
+
+    def best_dv(c, fam_set, dist):
+        ok = [f(p, "dv_mps") for p in cls if p["condition"] == c and p["scenario"] == "holding"
+              and p["family"] in fam_set and f(p, "survival") == 1.0
+              and f(p, "mean_dist_km") <= dist]
+        return min(ok) if ok else float("nan")
+
+    # classical: Harmonic vs Bias within 10 km
+    for c, tag in zip(conds, ("Only", "Kone")):
+        macro(f"moHarmTen{tag}", num(best_dv(c, ("Harmonic-LQR",), 10.0), 2))
+        macro(f"moBiasTen{tag}", num(best_dv(c, ("Bias-LQR",), 10.0), 2))
+    lines = []
+    for fam in fams:
+        cells = []
+        for c in conds:
+            sel = seeds(fam, c, "holding")
+            allr = [f(r, "best_classical_ratio") for r in sel]
+            agn = [f(r, "dv_mps") / best_dv(c, AGNOSTIC, f(r, "mean_dist_km")) for r in sel]
+            nd = sum((f(dense[(c, fam, r["train_seed"])], "dominated") if dense
+                      else f(r, "dominated")) == 0 for r in sel)
+            cells += [rf"${np.mean(agn):.2f} \pm {np.std(agn, ddof=1):.2f}$",
+                      rf"${np.mean(allr):.2f} \pm {np.std(allr, ddof=1):.2f}$", f"{nd}/5"]
+        label = fam.replace("-M", r"-M$^{\dagger}$")
+        lines.append(rf"{label} & " + " & ".join(cells) + r" \\")
+    write_table("tab_moon.tex", r"""
+\begin{tabular}{lcccccc}
+\toprule
+ & \multicolumn{3}{c}{Moon} & \multicolumn{3}{c}{$k = 1$ + Moon} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+ & $\times$ agnostic & $\times$ all & not dom. & $\times$ agnostic & $\times$ all & not dom. \\
+\midrule
+""" + "\n".join(lines) + r"""
+\bottomrule
+\end{tabular}""")
+    # text macros
+    for fam, tag in (("DR-PPO", "Dr"), ("MEM-PPO", "Mem"), ("RES-PPO", "Res"),
+                     ("DR-PPO-M", "Drm"), ("RES-PPO-M", "Resm")):
+        if fam not in fams:
+            continue
+        for c, ct in zip(conds, ("Only", "Kone")):
+            sel = seeds(fam, c, "holding")
+            macro(f"mo{tag}All{ct}", num(np.mean([f(r, "best_classical_ratio") for r in sel]), 2))
+    drm = seeds("DR-PPO-M", "k=1 + Moon", "holding")
+    agn = [f(r, "dv_mps") / best_dv("k=1 + Moon", AGNOSTIC, f(r, "mean_dist_km")) for r in drm]
+    macro("moDrmAgnMin", num(min(agn), 2))
+    macro("moDrmAgnMax", num(max(agn), 2))
+    resm = [r for c in conds for r in seeds("RES-PPO-M", c, "holding")]
+    env = [f(dense[(r["condition"], "RES-PPO-M", r["train_seed"])], "envelope_ratio") if dense
+           else f(r, "envelope_ratio") for r in resm]
+    macro("moResmEnvMin", f"{min(env):.3f}")
+    macro("moResmEnvMax", f"{max(env):.3f}")
+    if dense:
+        d = [r for r in dense.values() if r["family"] == "DR-PPO-M"]
+        macro("moDrmDenseNd", str(sum(f(r, "dominated") == 0 for r in d)))
+        macro("moDrmDenseOf", str(len(d)))
+        e = [f(r, "envelope_ratio") for r in d if f(r, "dominated") == 0]
+        macro("moDrmDenseEnvMin", f"{min(e):.3f}" if e else "--")
+        macro("moDrmDenseEnvMax", f"{max(e):.3f}" if e else "--")
+        dr = [r for r in dense.values() if r["family"] == "DR-PPO-M"
+              and r["condition"] == "k=1 + Moon"]
+        macro("moDrmCoarseNd", str(sum(f(r, "dominated_coarse") == 0 for r in dr)))
+    if (EXP / "moon_confirmation.csv").exists():                  # scripts/20
+        conf = load("moon_confirmation.csv")
+        macro("moConfNd", str(sum(f(r, "dominated") == 0 for r in conf)))
+        macro("moConfOf", str(len(conf)))
+        macro("moConfEnvMin", f"{min(f(r, 'envelope_ratio') for r in conf):.3f}")
+        macro("moConfEnvMax", f"{max(f(r, 'envelope_ratio') for r in conf):.3f}")
+        macro("moConfDesigns", str(len(load("moon_confirmation_classical.csv"))))
+        save = [f(r, "dv_mps") * (1 - f(r, "envelope_ratio")) for r in conf]
+        macro("moConfSaveMax", num(max(save), 2))
+        dists = sorted(f(r, "mean_dist_km") for r in conf)
+        macro("moConfDistMin", f"{dists[0]:.0f}")
+        macro("moConfDistMax", f"{dists[-1]:.0f}")
+    # recovery
+    rec = [r for fam in fams for c in conds for r in seeds(fam, c, "acquisition")]
+    macro("moRecNd", str(sum(f(r, "dominated") == 0 for r in rec)))
+    macro("moRecOf", str(len(rec)))
+
+
 # ---------------------------------------------------------------- 9. flown missions
 def missions():
     """Phase 9 (scripts/17): yearly delta-v of flown missions vs. this work at k = 1."""
@@ -934,12 +1034,14 @@ def missions():
     f = lambda r: float(r["dv_per_year_mps"])  # noqa: E731
     macro("msFlownMin", num(min(f(r) for r in flown), 2))
     macro("msFlownMax", num(max(f(r) for r in flown), 2))
-    loose = next(r for r in mine if r["name"] == "classical, cheapest")
-    tight = next(r for r in mine if r["name"].startswith("classical, cheapest within"))
-    macro("msLooseDv", num(f(loose), 2))
-    macro("msLooseDist", f"{float(loose['mean_dist_km']):.0f}")
-    macro("msTightDv", num(f(tight), 2))
-    macro("msTightDist", num(float(tight["mean_dist_km"]), 1))
+    for tag, yrs in (("", "k = 1"), ("Moon", "k = 1 + Moon")):
+        loose = next(r for r in mine if r["name"] == "classical, cheapest" and r["years"] == yrs)
+        tight = next(r for r in mine if r["name"].startswith("classical, cheapest within")
+                     and r["years"] == yrs)
+        macro(f"ms{tag}LooseDv", num(f(loose), 2))
+        macro(f"ms{tag}LooseDist", f"{float(loose['mean_dist_km']):.0f}")
+        macro(f"ms{tag}TightDv", num(f(tight), 2))
+        macro(f"ms{tag}TightDist", num(float(tight["mean_dist_km"]), 1))
     cite = {"Roberts 2003": r"\cite{roberts2003}", "Roberts 2011": r"\cite{roberts2011}",
             "Dichmann et al. 2014": r"\cite{dichmann2014}"}
     lines = []
@@ -950,7 +1052,9 @@ def missions():
                      rf"{f(r):.2f}{how} & {orbit} \\")
     lines.append(r"\addlinespace")
     for r in mine:
-        lines.append(rf"{r['name']} & this work & {f(r):.2f} & "
+        moon_tag = " + Moon" if "Moon" in r["years"] else ""
+        name = r["name"].replace("classical, cheapest within 10 km", r"classical, $\le$10~km")
+        lines.append(rf"{name}{moon_tag} & this work & {f(r):.2f} & "
                      rf"hold $L_1$, mean {float(r['mean_dist_km']):.1f}~km \\")
     write_table("tab_missions.tex", r"""
 \begin{tabular}{llll}
@@ -965,7 +1069,7 @@ Mission / controller & Source & $\dv$ per year [m/s] & Orbit / task \\
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     for step in (dynamics, lqr_phase3, comparison, ratios, robustness, thrust_logs,
-                 hyperparameters, mismatch, phase8, missions, figures, mismatch_figure, phase8_figure):
+                 hyperparameters, mismatch, phase8, moon, missions, figures, mismatch_figure, phase8_figure):
         step()
         print(f"{step.__name__} done", flush=True)
     text = "% Generated by scripts/11_paper_assets.py -- do not edit by hand.\n"
