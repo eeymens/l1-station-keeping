@@ -14,7 +14,7 @@
 PYTHON ?= python
 S := scripts
 
-.PHONY: install test reproduce figures lqr evaluate mismatch phase8 paper-assets paper train clean-paper
+.PHONY: install test reproduce figures lqr evaluate mismatch phase8 missions paper-assets paper train clean-paper
 
 install:
 	$(PYTHON) -m pip install -e ".[dev,rl]"
@@ -22,7 +22,7 @@ install:
 test:
 	$(PYTHON) -m pytest -q
 
-reproduce: test figures lqr evaluate mismatch phase8 paper-assets
+reproduce: test figures lqr evaluate mismatch phase8 missions paper-assets
 
 # Phases 1-2: dynamics, Lagrange points, uncontrolled escape (seconds)
 figures:
@@ -53,6 +53,10 @@ phase8:
 	$(PYTHON) $(S)/13_memory_residual.py
 	$(PYTHON) $(S)/14_confirmation.py
 	$(PYTHON) $(S)/15_frontier_search.py
+
+# Phase 9: yearly delta-v vs. flown L1/L2 missions (seconds)
+missions:
+	$(PYTHON) $(S)/17_mission_benchmark.py
 
 # Phase 6: every number and table in the paper, from experiments/*.csv
 paper-assets:

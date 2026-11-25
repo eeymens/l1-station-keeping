@@ -692,6 +692,38 @@ along the Bias-LQR frontier; MEM-PPO scatters above it.}
 \label{fig:phase8}
 \end{figure}
 
+\subsection{Plausibility check against flown missions}
+\label{sec:missions}
+
+Are the simulated fuel costs realistic? Table~\ref{tab:missions} sets our
+yearly $\dv$ at $k = 1$ (real eccentricity and our SRP assumption) beside the
+published station-keeping costs of flown libration-point missions. The two are
+not the same task: SOHO, ACE and WIND fly halo or Lissajous orbits with
+amplitudes of $10^5$~km and about four impulsive burns a year
+\cite{roberts2011}, while our controllers hold the point itself with a small
+daily thrust in a planar model. What the comparison can show is the order of
+magnitude, and it agrees. The flown missions spend
+\msFlownMin--\msFlownMax~m/s per year. Our cheapest classical design spends
+\msLooseDv~m/s while drifting a mean \msLooseDist~km towards the SRP-shifted
+equilibrium; staying within 10~km of $L_1$ costs \msTightDv~m/s, most of it to
+cancel the SRP push that a real halo orbit simply absorbs into its shape. The
+learned controllers fall in the same range. A practical lesson from the
+missions also matches our setting: the cost of correcting a libration-point
+orbit grows exponentially with the time since the last manoeuvre (doubling in
+about 16 days \cite{roberts2011}), which is why a daily continuous thrust, as
+in our model, is cheap compared with burns months apart.
+
+\begin{table}[t]
+\centering
+\caption{Yearly station-keeping $\dv$ of flown missions and of this work at
+$k = 1$ (holding, test seeds). $^{*}$Derived: average burn size $\times$ four
+burns a year (SOHO 0.09, WIND 0.17~m/s per burn), or the planned 25.5~m/s over
+10.5 years (JWST). Different tasks: compare orders of magnitude only.}
+\label{tab:missions}
+\small
+\input{generated/tab_missions}
+\end{table}
+
 % ===========================================================================
 \section{Discussion}
 
@@ -741,10 +773,10 @@ control here.
 \paragraph{Limitations.}
 \label{sec:limits}
 The problem is planar and holds the point itself, not a halo or Lissajous
-orbit, so the absolute $\dv$ values should not be compared with real missions.
+orbit, so the absolute $\dv$ values can be compared with real missions only in
+order of magnitude (Section~\ref{sec:missions}).
 Thrust is a small continuous push updated daily, rather than impulsive
-manoeuvres weeks apart. Only Bias-LQR uses a state estimator; giving one (or a
-memory) to the RL agents is the most obvious next step. The unmodelled physics
+manoeuvres weeks apart. The unmodelled physics
 of Section~\ref{sec:mismatch} is limited to the eccentricity and SRP; the Moon,
 the planets and a full ephemeris model are not included, and the SRP
 area-to-mass ratio is an assumption. The RL reward and the LQR cost are different

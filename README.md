@@ -10,6 +10,8 @@ The Sun–Earth L1 point sits about 1.49 million km sunward of Earth. It is an e
 
 **Phase 8: give RL the missing information.** A memory of the last 10 observations makes PPO *worse*. A residual PPO correction on top of the Kalman bias-estimating LQR is the first learned controller that is **not dominated**: on 100 fresh seeds and after a dense search of 1,011 classical designs per severity, no classical design beats it while holding under SRP. Its edge is at most 0.6 % (≤ 0.01 m/s per year), though, so RL *reaches* the classical frontier rather than moving it.
 
+**Phase 9: reality check and a recurrent policy.** With real eccentricity and SRP, our controllers spend 0.4–2 m/s per year, the same range as the flown L1/L2 missions SOHO, ACE, WIND and JWST (0.36–2.43 m/s per year). A recurrent (LSTM) PPO tests whether phase 8's memory failure was the network or the information *(training on CI, results pending)*.
+
 📄 **Paper draft:** [`paper/main.pdf`](paper/main.pdf) · **Reproduce everything:** `make reproduce` (see [Reproducing the results](#reproducing-the-results))
 
 ![Uncontrolled drift away from L1](figures/l1_escape.png)
@@ -28,6 +30,7 @@ The Sun–Earth L1 point sits about 1.49 million km sunward of Earth. It is an e
 | 6 | Paper draft (numbers generated from the CSVs), one-command reproduction, CI | Done |
 | 7 | Model mismatch: elliptic Earth orbit + solar radiation pressure, LQI and Kalman bias-estimating LQR, domain-randomised PPO (5 seeds) | Done |
 | 8 | RL with memory and residual RL on Bias-LQR (5 seeds each), confirmation on fresh seeds and a dense classical frontier search | Done |
+| 9 | Plausibility check against flown missions; recurrent (LSTM) PPO, 5 seeds | Benchmark done, LSTM training |
 
 ## Results
 
@@ -182,6 +185,22 @@ So residual RL *matches* the best classical controller while holding under SRP, 
 
 Turkish notes: [`docs/faz8_notlar.md`](docs/faz8_notlar.md). Raw results: `experiments/phase8.csv`, `experiments/confirmation*.csv`, `experiments/frontier_search*.csv`.
 
+**Are these fuel costs realistic? (phase 9).** `scripts/17_mission_benchmark.py` sets the yearly Δv at k = 1 beside published station-keeping costs of flown missions. The tasks differ (the missions fly 10⁵ km halo/Lissajous orbits with ~4 burns a year; we hold the point with a daily thrust in a planar model), so only the order of magnitude is comparable, and it agrees:
+
+| | Δv per year [m/s] | |
+| --- | --- | --- |
+| SOHO 1996–98 / 2004–11 | 2.4 / 0.36* | Roberts 2003, 2011 |
+| WIND 2008–11 | 0.68* | Roberts 2011 |
+| ACE 2003–11 | 1.0 | Roberts 2011 |
+| JWST (L2, planned) | 2.43* | Dichmann et al. 2014 |
+| This work: cheapest classical (drifts ~220 km towards the SRP-shifted equilibrium) | 0.40 | |
+| This work: cheapest classical within 10 km | 1.85 | |
+| This work: DR-PPO / RES-PPO | 2.02 / 1.87 | |
+
+\* derived from the reported average burn size × 4 burns a year, or 25.5 m/s over 10.5 years (JWST). Holding L1 within 10 km costs more than a halo orbit mainly because the controller has to cancel the SRP push that a halo orbit absorbs into its shape.
+
+![Flown missions vs this work](figures/mission_benchmark.png)
+
 **Current simplifications.** The spacecraft holds the L1 point itself; real missions fly halo or Lissajous orbits around it (to keep the Sun out of the antenna beam). Motion is planar, and thrust is a low, continuous push updated daily rather than impulsive burns weeks apart. These are deliberate, so LQR and RL are compared on identical, controlled conditions.
 
 ## The model
@@ -206,7 +225,7 @@ Velocity Verlet is not used because the Coriolis term depends on velocity, which
 git clone https://github.com/eeymens/l1-station-keeping.git
 cd l1-station-keeping
 make install        # pip install -e ".[dev,rl]"  (CPU-only PyTorch is enough)
-make test           # pytest, 36 tests
+make test           # pytest, 65 tests
 make reproduce      # every figure, CSV and paper number from the trained models (~4 h on two cores, mostly the phase-7/8 classical sweeps)
 make paper          # paper/main.pdf (needs LaTeX)
 ```
@@ -229,6 +248,8 @@ make paper          # paper/main.pdf (needs LaTeX)
 | `13_memory_residual.py` | `experiments/phase8.csv`, `figures/phase8_pareto.png` (phase 8) |
 | `14_confirmation.py` | `experiments/confirmation*.csv` (phase 8, seeds 200–299) |
 | `15_frontier_search.py` | `experiments/frontier_search*.csv` (phase 8, dense classical search) |
+| `16_lstm.py` | `experiments/phase9.csv`, `figures/phase9_pareto.png` (phase 9, needs the LSTM models) |
+| `17_mission_benchmark.py` | `experiments/mission_benchmark.csv`, `figures/mission_benchmark.png` (phase 9) |
 | `11_paper_assets.py` | `paper/generated/` — every number and table in the paper |
 
 Package versions verified to reproduce the committed results: [`requirements-lock.txt`](requirements-lock.txt).
