@@ -29,10 +29,9 @@ start of every episode.
 """
 
 import numpy as np
-from scipy.linalg import solve_discrete_are
-
 from ..constants import TIME_UNIT_DAYS
 from .lqr import LQRController, dlqr
+from .riccati import kalman_dare
 from .station_keeping import KM, MPS, MPS2, NoiseModel
 
 
@@ -88,9 +87,12 @@ class BiasLQRController(LQRController):
     bias_walk_mps2 : float
         1-sigma change of the disturbance per control interval (random walk).
         Sets how fast the estimate follows a slowly varying disturbance.
+    riccati : {"legacy", "balanced"}
+        How the filter's Riccati equation is solved (see `cr3bp.control.riccati`);
+        "legacy" (default) reproduces every committed result.
     """
 
-    def __init__(self, noise=None, bias_walk_mps2=2e-10, **kwargs):
+    def __init__(self, noise=None, bias_walk_mps2=2e-10, riccati="legacy", **kwargs):
         super().__init__(**kwargs)
         noise = NoiseModel() if noise is None else noise
         n, m = self.Bd.shape
@@ -107,7 +109,9 @@ class BiasLQRController(LQRController):
         Qn = np.block([[Qx, np.zeros((n, m))], [np.zeros((m, n)), Qd]])
         Qn += np.eye(n + m) * 1e-30                 # keep the Riccati equation well posed
         Rn = np.diag([max(noise.pos_km, 1e-3) * KM] * 2 + [max(noise.vel_mps, 1e-6) * MPS] * 2) ** 2
-        P = solve_discrete_are(self.Fa.T, H.T, Qn, Rn)
+        scale = np.r_[[KM] * 2, [1e-3 * MPS] * 2, [1e-9 * MPS2] * m]   # 1 km, 1 mm/s, 1e-9 m/s^2
+        P, self.riccati_info = kalman_dare(self.Fa, H, Qn, Rn, scale=scale, method=riccati)
+        self.bias_walk_mps2 = bias_walk_mps2
         S = H @ P @ H.T + Rn
         self.L = P @ H.T @ np.linalg.inv(S)         # Kalman gain (predicted -> filtered)
         # ---- steady state (x_ss, u_ss) as a linear function of d:

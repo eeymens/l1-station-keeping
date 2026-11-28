@@ -4,7 +4,8 @@
 #   make test        run the test suite
 #   make reproduce   regenerate every figure, CSV and paper number from the
 #                    trained models in models/ (~3 h on one core, most of it
-#                    the phase-7 and phase-8 classical sweeps)
+#                    the phase-7 and phase-8 classical sweeps, plus ~3.5 h
+#                    on two cores for the K3 filter-tuning sweep)
 #   make paper       build paper/main.pdf (needs a LaTeX distribution)
 #   make train       retrain every RL agent from scratch (~13 h on one core,
 #                    plus ~20 h for the five LSTM agents;
@@ -15,7 +16,7 @@
 PYTHON ?= python
 S := scripts
 
-.PHONY: install test reproduce figures lqr evaluate mismatch phase8 phase9 missions paper-assets paper train clean-paper
+.PHONY: install test reproduce figures lqr evaluate mismatch phase8 phase9 missions k3 paper-assets paper train clean-paper
 
 install:
 	$(PYTHON) -m pip install -e ".[dev,rl]"
@@ -23,7 +24,7 @@ install:
 test:
 	$(PYTHON) -m pytest -q
 
-reproduce: test figures lqr evaluate mismatch phase8 phase9 missions paper-assets
+reproduce: test figures lqr evaluate mismatch phase8 phase9 missions k3 paper-assets
 
 # Phases 1-2: dynamics, Lagrange points, uncontrolled escape (seconds)
 figures:
@@ -68,6 +69,13 @@ missions:
 	$(PYTHON) $(S)/19_moon_frontier.py
 	$(PYTHON) $(S)/20_moon_confirmation.py
 	$(PYTHON) $(S)/17_mission_benchmark.py
+
+# Audit K3: the Moon comparison with the classical filters' process noise
+# (bias_walk) and LQI's integral time also swept, ~15,000 designs screened on
+# seeds 300-309, the best ~2,000 re-flown on fresh seeds 200-299 (~3.5 h on
+# two cores; needs the missions target)
+k3:
+	$(PYTHON) $(S)/21_k3_tuning_sweep.py
 
 # Phase 6: every number and table in the paper, from experiments/*.csv
 paper-assets:

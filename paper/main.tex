@@ -60,13 +60,14 @@ disturbance-estimating LQR also reaches the classical Pareto frontier: on 100 fr
 seeds and after a dense search of the classical design space, no classical
 design dominates it, although its advantage is at most \peFsMarginMax\,\%.
 The Moon, whose pull near $L_1$ oscillates instead of staying constant, is
-where learning gains most: PPO trained with it spends
-\moDrmAgnMin--\moDrmAgnMax$\times$ the fuel of classical controllers that do
-not model the Moon, and two of five training seeds stay
-\moConfEnvMin--\moConfEnvMax$\times$ the frontier even of a classical
-controller that models its frequency, on fresh seeds as well. The margin over
-that controller is small, so we read RL's advantage as saved modelling effort
-rather than better control. Code and data are open source.
+where learning gains most against simple baselines: PPO trained with it spends
+\kThreeAgnMin--\kThreeAgnMax$\times$ the fuel of classical controllers that do
+not model the Moon. A classical controller that models the Moon's frequency
+closes the gap once its Kalman filter is tuned too: on fresh seeds it
+dominates \kThreeFreshDomWord\ of five training seeds, and the remaining one is
+\kThreeBestEnv$\times$ its frontier (95\,\% CI
+\kThreeBestLo--\kThreeBestHi), i.e.\ on it. We read RL's advantage as saved
+modelling effort rather than better control. Code and data are open source.
 \end{abstract}
 
 % ===========================================================================
@@ -793,7 +794,8 @@ a residual agent on Harmonic-LQR.
 classical design at least as accurate, among the Moon-agnostic families (LQR,
 LQI, Bias-LQR) and among all four (with Harmonic-LQR), coarse sweep, mean
 $\pm$ std over 5 training seeds; and the seeds that no classical design
-dominates after the dense search. $^{\dagger}$Trained with the Moon.}
+dominates after the dense search (for DR-PPO-M and RES-PPO-M at $k = 1$ + Moon:
+after the filter search, Table~\ref{tab:k3}). $^{\dagger}$Trained with the Moon.}
 \label{tab:moon}
 \small
 \input{generated/tab_moon}
@@ -817,21 +819,67 @@ force it was trained on, not unmodelled forces in general.
 coarse sweep in any holding case, but a dense search of Harmonic-LQR and
 Bias-LQR (\moDenseDesigns\ more designs per condition, $r_\text{ref}$ from 10
 to 1000~km $\times$ 41 values of $\rho$) puts all its seeds at
-\moResmEnvMin--\moResmEnvMax$\times$ the envelope: like RES-PPO under SRP, it
-reaches the frontier without moving it. DR-PPO-M, learning from scratch,
-spends \moDrmAgnMin--\moDrmAgnMax$\times$ the fuel of the best Moon-agnostic
-classical design at equal accuracy at $k = 1$, i.e.\ it learned from data
-what the agnostic designs miss. Against Harmonic-LQR, \moDrmDenseNd\ of its
-\moDrmDenseOf\ seed/condition cases remain undominated after the dense search,
-both at $k = 1$ + Moon, at \moDrmDenseEnvMin--\moDrmDenseEnvMax$\times$ the
-envelope. On 100 fresh seeds (200--299) against the \moConfDesigns\ dense
-designs near them, both stay undominated at
-\moConfEnvMin--\moConfEnvMax$\times$ the envelope, holding
-\moConfDistMin--\moConfDistMax~km from $L_1$. \textbf{This is the first
-learned controller in the study that is below the classical frontier on
-fresh seeds}, but the result is narrow: two of five training seeds, one
-condition, loose tracking, and a saving of at most \moConfSaveMax~m/s per
-year. In recovery, \moRecNd\ of the \moRecOf\ RL seed/condition cases are undominated.
+\moResmEnvMin--\moResmEnvMax$\times$ the envelope. DR-PPO-M, learning from
+scratch, spends \moDrmAgnMin--\moDrmAgnMax$\times$ the fuel of the best
+Moon-agnostic classical design of that sweep at equal accuracy at $k = 1$,
+i.e.\ it learned from data what the agnostic designs miss. After the dense
+search \moDrmDenseNd\ of its \moDrmDenseOf\ seed/condition cases remained
+undominated, both at $k = 1$ + Moon, at
+\moDrmDenseEnvMin--\moDrmDenseEnvMax$\times$ the envelope, and on 100 fresh
+seeds (200--299) against the \moConfDesigns\ dense designs near them they
+stayed at \moConfEnvMin--\moConfEnvMax$\times$ the envelope.
+
+\paragraph{Tuning the classical filters closes the gap.} Both searches kept the
+process noise of the Bias-LQR and Harmonic-LQR Kalman filters (the
+random-walk step $\sigma_d$ of the disturbance states,
+$2\times10^{-10}$~m/s$^2$ per day) and LQI's integral time scale (60~days)
+fixed. We therefore searched them as well, at $k = 1$ + Moon while holding:
+$\sigma_d$ from $\kThreeBwMin$ to $\kThreeBwMax$~m/s$^2$ (\kThreeNBw\ values,
+log-spaced) for Bias-LQR and Harmonic-LQR, the integral time from
+\kThreeTintMin\ to \kThreeTintMax~days (\kThreeNTint\ values) for LQI, each
+crossed with \kThreeNRref\ values of $r_\text{ref}$ and \kThreeNRho\ of $\rho$,
+plus every design of the earlier sweeps: \kThreeDesigns\ designs. To keep the
+fresh seeds clean, every design was first screened on \kThreeNScreen\ seeds
+(300--309) used nowhere else; the \kThreeFinal\ designs within
+\kThreeMargin\,\% of the screening envelope (of all families, or of the
+Moon-agnostic ones) then flew the fresh and the test seeds. For
+$\sigma_d \le 10^{-10}$~m/s$^2$ the filter's Riccati equation, badly scaled in
+nondimensional units, could not be solved as written; we solve the same
+equation in scaled coordinates (relative residual $\sim 10^{-10}$), and
+\kThreeFailed\ designs failed.
+
+The result (Table~\ref{tab:k3}) withdraws the earlier claim. A faster
+Harmonic-LQR filter, with $\sigma_d$ between $\kThreeBwBestMin$ and
+$\kThreeBwBestMax$~m/s$^2$, lowers its frontier: DR-PPO-M seeds 2 and 4 go from \kThreeBeforeTwo\ and
+\kThreeBeforeFour\ to \kThreeAfterTwo\ and \kThreeAfterFour$\times$ the
+fresh-seed envelope. Only seed \kThreeBestSeed\ remains undominated. It is
+\kThreeBestPct\,\% below the envelope, a saving of \kThreeBestSave~m/s per
+year, with a 95\,\% bootstrap interval of \kThreeBestLo--\kThreeBestHi\ and
+no dominating design in \kThreeBestPnd\,\% of the resamples: on the frontier
+within its statistical resolution rather than below it. The other
+\kThreeFreshDomWord\ are dominated, and the test seeds agree (\kThreeTestNd\
+of \kThreeOf\ undominated). RES-PPO-M is now dominated in every seed
+(\kThreeResmEnvMin--\kThreeResmEnvMax$\times$ the envelope, test seeds). Tuning
+also strengthens the Moon-agnostic Bias-LQR, whose faster filter partly
+follows the oscillating pull: DR-PPO-M spends
+\kThreeAgnMin--\kThreeAgnMax$\times$ the fuel of the best agnostic design at
+equal accuracy on fresh seeds. With its filter tuned, then, a classical
+controller that models the Moon is as good as the best learned controller and
+better than the rest. In recovery (untuned sweep), \moRecNd\ of the \moRecOf\
+RL seed/condition cases are undominated.
+
+\begin{table}[t]
+\centering
+\caption{DR-PPO-M against the classical designs with tuned filters
+(Section~\ref{sec:moon}), $k = 1$ + Moon, holding: mean distance and yearly
+$\dv$ (fresh seeds), envelope ratio before (scripts~19--20) and after the
+filter search, paired bootstrap 95\,\% interval and share of resamples in which
+no design dominates the agent; test seeds as a secondary check.}
+\label{tab:k3}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\input{generated/tab_k3}
+\end{table}
 
 \subsection{Plausibility check against flown missions}
 \label{sec:missions}
@@ -920,11 +968,12 @@ control here.
 
 \paragraph{When RL helps.} The Moon is the case the previous paragraph
 anticipated, and it partly confirms it. Against classical controllers that do
-not model the Moon, an agent trained with it saves 10--30\,\% of the fuel at
+not model the Moon, an agent trained with it saves
+\kThreeAgnSaveMin--\kThreeAgnSaveMax\,\% of the fuel at
 equal accuracy, without anyone writing down the Moon's frequency. But the
 classical engineer who does write it down (Harmonic-LQR, a few dozen lines)
-gets back to the frontier, and the RL margin over that controller is at most
-a few per cent. Our reading is that RL's advantage here is the cost of
+and tunes its filter gets back to the frontier: no RL seed is meaningfully
+below it. Our reading is that RL's advantage here is the cost of
 modelling, not the quality of control: it pays when the disturbance is
 unknown or hard to model, and shrinks when it is known.
 
@@ -960,8 +1009,10 @@ still dominate it, and Earth's eccentricity has almost no effect on holding the
 point. A residual PPO correction on that estimator reaches, but does not
 meaningfully move, the classical frontier, and so does a recurrent PPO agent
 without a classical base. Under the Moon's periodic pull,
-PPO trained with the Moon beats every classical design that does not model it
-and, in two of five seeds, edges slightly below the frontier of one that does.
+PPO trained with the Moon beats, while holding, every classical design that
+does not model it, but a classical design that models the Moon and has its
+filter tuned dominates \kThreeFreshDomWord\ of five training seeds and matches
+the remaining one.
 Natural next steps are halo-orbit
 station-keeping in three dimensions (where the eccentricity matters),
 recurrent policies trained with the Moon, and residual RL in settings where

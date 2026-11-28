@@ -30,10 +30,9 @@ The class reuses LQRController's discretisation, K, Q and R.
 """
 
 import numpy as np
-from scipy.linalg import solve_discrete_are
-
 from ..perturbations import MOON_RATE
 from .lqr import LQRController
+from .riccati import kalman_dare
 from .station_keeping import KM, MPS, MPS2, NoiseModel
 
 
@@ -55,9 +54,16 @@ class HarmonicLQRController(LQRController):
     bias_walk_mps2 : float
         1-sigma change per control interval of the constant force and of each
         oscillator's components (lets the estimate adapt).
+    riccati : {"legacy", "balanced"}
+        How the filter's Riccati equation is solved (see `cr3bp.control.riccati`).
+        "legacy" (default) reproduces every committed result but cannot solve
+        bias_walk_mps2 <= 1e-10; "balanced" solves the same equation in scaled
+        coordinates, accurately, for any bias_walk_mps2 down to 1e-11. A design
+        that cannot be solved raises `RiccatiError`.
     """
 
-    def __init__(self, harmonics=(1, 2, 3), noise=None, bias_walk_mps2=2e-10, **kwargs):
+    def __init__(self, harmonics=(1, 2, 3), noise=None, bias_walk_mps2=2e-10,
+                 riccati="legacy", **kwargs):
         super().__init__(**kwargs)
         noise = NoiseModel() if noise is None else noise
         n, m = self.Bd.shape
@@ -86,7 +92,10 @@ class HarmonicLQRController(LQRController):
         Qn += np.eye(n + nd) * 1e-30
         Rn = np.diag([max(noise.pos_km, 1e-3) * KM] * 2
                      + [max(noise.vel_mps, 1e-6) * MPS] * 2) ** 2
-        P = solve_discrete_are(self.Fa.T, H.T, Qn, Rn)
+        # state scale for the balanced solve: 1 km, 1 mm/s, 1e-9 m/s^2
+        scale = np.r_[[KM] * 2, [1e-3 * MPS] * 2, [1e-9 * MPS2] * nd]
+        P, self.riccati_info = kalman_dare(self.Fa, H, Qn, Rn, scale=scale, method=riccati)
+        self.bias_walk_mps2 = bias_walk_mps2
         self.L = P @ H.T @ np.linalg.inv(H @ P @ H.T + Rn)
         # ---- constant part: as Bias-LQR
         G = np.hstack([self.Ad - np.eye(n), self.Bd])

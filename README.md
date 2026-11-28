@@ -10,7 +10,7 @@ The Sun–Earth L1 point sits about 1.49 million km sunward of Earth. It is an e
 
 **Phase 8: give RL the missing information.** A memory of the last 10 observations makes PPO *worse*. A residual PPO correction on top of the Kalman bias-estimating LQR is the first learned controller that is **not dominated**: on 100 fresh seeds and after a dense search of 1,011 classical designs per severity, no classical design beats it while holding under SRP. Its edge is at most 0.6 % (≤ 0.01 m/s per year), though, so RL *reaches* the classical frontier rather than moving it.
 
-**Phase 9: the Moon, a reality check and a recurrent policy.** The Moon's pull near L1 *oscillates* (mostly every 14.8 days) instead of staying constant, the case where RL was expected to gain. A classical controller that models the Moon's known frequency (Harmonic-LQR, internal model principle) leads the classical side. PPO trained with the Moon spends 0.69–0.91× the fuel of classical controllers that do *not* model it, and 2 of 5 training seeds stay **1.4–1.6 % below the frontier even of Harmonic-LQR, confirmed on 100 fresh seeds** — the first learned controller below the classical frontier in this study, though narrowly (≤ 0.08 m/s per year). Our fuel costs are also in the range of flown L1/L2 missions (SOHO, ACE, WIND, JWST). A recurrent (LSTM) PPO answers phase 8's memory failure: it was the network, not the information. LSTM-PPO uses less fuel than DR-PPO in 33 of 40 cases with SRP and, while holding, 14 of 20 seed/severity cases are not dominated by any classical design: the first *purely learned* controller on the SRP frontier, though not beyond it.
+**Phase 9: the Moon, a reality check and a recurrent policy.** The Moon's pull near L1 *oscillates* (mostly every 14.8 days) instead of staying constant, the case where RL was expected to gain. A classical controller that models the Moon's known frequency (Harmonic-LQR, internal model principle) leads the classical side. PPO trained with the Moon spends 0.74–0.98× the fuel of classical controllers that do *not* model it. Against Harmonic-LQR the earlier result (2 of 5 seeds 1.4–1.6 % below its frontier) **did not survive tuning its Kalman filter** (audit K3, `scripts/21`): with the filter's process noise searched too (14,954 designs, seeds kept clean), Harmonic-LQR dominates 4 of 5 training seeds on 100 fresh seeds, and the fifth is 0.998× its frontier (95 % CI 0.995–1.000), i.e. on it. **Once the classical controller models the Moon and is tuned, the gap closes.** Our fuel costs are also in the range of flown L1/L2 missions (SOHO, ACE, WIND, JWST). A recurrent (LSTM) PPO answers phase 8's memory failure: it was the network, not the information. LSTM-PPO uses less fuel than DR-PPO in 33 of 40 cases with SRP and, while holding, 14 of 20 seed/severity cases are not dominated by any classical design: the first *purely learned* controller on the SRP frontier, though not beyond it.
 
 📄 **Paper draft:** [`paper/main.pdf`](paper/main.pdf) · **Reproduce everything:** `make reproduce` (see [Reproducing the results](#reproducing-the-results))
 
@@ -225,15 +225,30 @@ Holding, test seeds, Δv ÷ cheapest classical design at least as accurate (mean
 | MEM-PPO | 1.22 | 1.55 | 0/5 | 1.16 | 1.27 | 0/5 |
 | RES-PPO | 1.01 | 1.31 | 0/5 | 1.00 | 1.09 | 0/5 |
 | LSTM-PPO | 1.84 | 2.26 | 0/5 | 1.46 | 1.54 | 0/5 |
-| DR-PPO-M (trained with the Moon) | 0.88 | 1.36 | 0/5 | 0.82 | 1.03 | **2/5** |
-| RES-PPO-M (trained with the Moon) | 0.79 | 0.98 | 0/5 | 0.93 | 0.98 | 3/5 |
+| DR-PPO-M (trained with the Moon) | 0.88 | 1.36 | 0/5 | 0.82 | 1.03 | 1/5 |
+| RES-PPO-M (trained with the Moon) | 0.79 | 0.98 | 0/5 | 0.93 | 0.98 | 0/5 |
+
+"Not dom." for DR-PPO-M and RES-PPO-M at k = 1 + Moon is after the filter-tuning search of `scripts/21` (it was 2/5 and 3/5 before).
 
 - **Memory helps here.** MEM-PPO, worse than DR-PPO under SRP, needs half its fuel under the Moon.
-- **RES-PPO-M sits on the frontier** (1.000–1.006× the dense envelope), the phase 8 pattern again.
-- **DR-PPO-M seeds 2 and 4 are below it**: 0.983–0.986× the dense envelope on test seeds, 0.984–0.986× on 100 fresh seeds (`scripts/20`, 538 nearby designs), at 29 and 170 km from L1. Narrow (2 of 5 seeds, one condition, ≤ 0.08 m/s per year), but the first such result here.
+- **RES-PPO-M** sat on the frontier of the phase-9 sweep (1.000–1.006× the dense envelope); against tuned filters it is dominated in every seed (1.015–1.022×, test seeds).
+- **DR-PPO-M seeds 2 and 4** were 0.983–0.986× the dense envelope (test and fresh seeds). That sweep left the Kalman filters' process noise `bias_walk_mps2` at 2e-10. **Audit K3 fix** (`scripts/21_k3_tuning_sweep.py`): `bias_walk` 1e-11 – 1e-6 m/s² (11 values) for Bias-LQR and Harmonic-LQR, LQI's integral time 7.5–960 days (8 values), each × 11 r_ref × 41 ρ, plus all earlier designs — 14,954 designs screened on unused seeds 300–309, the 1,992 within 2 % of the screening envelope flown on fresh seeds 200–299 (and test seeds as a check), paired bootstrap over seeds:
+
+| DR-PPO-M seed | km | Δv [m/s] | envelope, before | envelope, after (fresh) | 95 % CI | not dominated |
+|---|---|---|---|---|---|---|
+| 0 | 16 | 6.335 | – | 1.138 | 1.136–1.140 | no |
+| 1 | 14 | 6.459 | – | 1.144 | 1.141–1.147 | no |
+| 2 | 170 | 3.864 | 0.986 | 1.027 | 1.021–1.032 | no |
+| 3 | 151 | 4.220 | – | 1.062 | 1.059–1.065 | no |
+| 4 | 29 | 5.346 | 0.984 | 0.998 | 0.995–1.000 | yes (98 % of resamples) |
+
+  A faster Harmonic-LQR filter (`bias_walk` ≈ 3e-9 – 1e-8) moves its frontier down; the optimum is flat above that. Seed 4's 0.2 % (0.01 m/s per year) is within the frontier's statistical resolution. The earlier "below the classical frontier" claim is withdrawn.
+- The filter Riccati equation of Harmonic-LQR could not be solved for `bias_walk ≤ 1e-10` (scipy's Schur method fails on the badly scaled problem). `riccati="balanced"` solves the same equation in scaled coordinates; failures raise `RiccatiError` and are logged by the sweep (0 in practice). The default stays `"legacy"` so every committed result reproduces bit for bit.
 - Recovery: all 50 RL cases are dominated.
 
-Reading: RL's advantage under the Moon is mostly the modelling it saves — it beats every classical design that ignores the Moon without anyone writing down its frequency; once the classical side models it, the gap is a few per cent at most.
+Reading: RL's advantage under the Moon is the modelling it saves — it beats every classical design that ignores the Moon without anyone writing down its frequency; once the classical side models it and tunes its filter, the gap closes.
+
+![Audit K3: DR-PPO-M vs tuned classical designs](figures/k3_frontier.png)
 
 ![The Moon](figures/moon_pareto.png)
 
@@ -291,6 +306,7 @@ make paper          # paper/main.pdf (needs LaTeX)
 | `18_moon.py` | `experiments/moon*.csv`, `figures/moon_pareto.png` (phase 9, the Moon) |
 | `19_moon_frontier.py` | `experiments/moon_frontier*.csv` (phase 9, dense classical search under the Moon) |
 | `20_moon_confirmation.py` | `experiments/moon_confirmation*.csv` (phase 9, seeds 200–299) |
+| `21_k3_tuning_sweep.py` | `experiments/k3_*.csv`, `figures/k3_frontier.png` (audit K3: filter process-noise / integral-time search, screening seeds 300–309, fresh seeds 200–299) |
 | `11_paper_assets.py` | `paper/generated/` — every number and table in the paper |
 
 Package versions verified to reproduce the committed results: [`requirements-lock.txt`](requirements-lock.txt).

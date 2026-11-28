@@ -1007,6 +1007,10 @@ def moon():
                                   and r["condition"] == c and r["scenario"] == scen
                                   and r["train_seed"] not in ("mean", "std", "-1")]
     fams = [fam for fam in MOON_FAMS if seeds(fam, conds[0], "holding")]
+    k3_test = ({(fam, "k=1 + Moon"): [r for r in load("k3_agents.csv")
+                                      if r["seed_set"] == "test" and r["family"] == fam]
+                for fam in ("DR-PPO-M", "RES-PPO-M")}
+               if (EXP / "k3_agents.csv").exists() else {})
     macro("moDesigns", str(len({(r["family"], r["r_ref_km"], r["rho"]) for r in cls})))
     macro("moDenseDesigns", str(len({(r["family"], r["r_ref_km"], r["rho"])
                                      for r in load("moon_frontier_designs.csv")}))
@@ -1031,6 +1035,8 @@ def moon():
             agn = [f(r, "dv_mps") / best_dv(c, AGNOSTIC, f(r, "mean_dist_km")) for r in sel]
             nd = sum((f(dense[(c, fam, r["train_seed"])], "dominated") if dense
                       else f(r, "dominated")) == 0 for r in sel)
+            if (fam, c) in k3_test:              # audit K3: filters tuned as well
+                nd = sum(f(r, "dominated") == 0 for r in k3_test[(fam, c)])
             cells += [rf"${np.mean(agn):.2f} \pm {np.std(agn, ddof=1):.2f}$",
                       rf"${np.mean(allr):.2f} \pm {np.std(allr, ddof=1):.2f}$", f"{nd}/5"]
         label = fam.replace("-M", r"-M$^{\dagger}$")
@@ -1090,6 +1096,103 @@ def moon():
     macro("moRecOf", str(len(rec)))
 
 
+# ---------------------------------------------------------------- 9. audit K3: filter tuning
+def k3():
+    """Audit K3 (scripts/21): the Moon comparison with the classical filters tuned too."""
+    if not (EXP / "k3_agents.csv").exists():
+        return
+    allrows = load("k3_agents.csv")
+    rows = [r for r in allrows if r["family"] == "DR-PPO-M"]
+    resm = [r for r in allrows if r["family"] == "RES-PPO-M" and r["seed_set"] == "test"]
+    macro("kThreeResmEnvMin", f"{min(float(r['envelope_ratio']) for r in resm):.3f}")
+    macro("kThreeResmEnvMax", f"{max(float(r['envelope_ratio']) for r in resm):.3f}")
+    macro("kThreeResmNd", str(sum(float(r["dominated"]) == 0 for r in resm)))
+    run = json.loads((EXP / "k3_run.json").read_text())
+    final = load("k3_final.csv")
+    f = lambda r, k: float(r[k])  # noqa: E731
+    fresh = sorted((r for r in rows if r["seed_set"] == "fresh"), key=lambda r: int(r["train_seed"]))
+    test = {r["train_seed"]: r for r in rows if r["seed_set"] == "test"}
+    conf = {r["model"]: r for r in load("moon_confirmation.csv")}
+    macro("kThreeDesigns", f"{run['screen_designs']:,}".replace(",", "{,}"))
+    macro("kThreeFailed", str(run["screen_failed"] + run["final_failed"]))
+    macro("kThreeFinal", f"{run['final_designs']:,}".replace(",", "{,}"))
+    macro("kThreeHours", num((run["screen_minutes"] + run["final_minutes"]) / 60, 1))
+    macro("kThreeBwMin", sci(min(run["bias_walks"]), 1))
+    macro("kThreeBwMax", sci(max(run["bias_walks"]), 1))
+    macro("kThreeNBw", str(len(run["bias_walks"])))
+    macro("kThreeTintMin", f"{min(run['t_ints']):g}")
+    macro("kThreeTintMax", f"{max(run['t_ints']):g}")
+    macro("kThreeNTint", str(len(run["t_ints"])))
+    macro("kThreeNRref", str(run["n_r_ref"]))
+    macro("kThreeNRho", str(run["n_rho"]))
+    macro("kThreeMargin", f"{100 * run['screen_margin']:g}")
+    macro("kThreeNScreen", str(run["n_screen_seeds"]))
+    nd = [r for r in fresh if f(r, "dominated") == 0]
+    macro("kThreeFreshNd", str(len(nd)))
+    macro("kThreeTestNd", str(sum(f(r, "dominated") == 0 for r in test.values())))
+    macro("kThreeOf", str(len(fresh)))
+    env = [f(r, "envelope_ratio") for r in fresh]
+    macro("kThreeEnvMin", f"{min(env):.3f}")
+    macro("kThreeEnvMax", f"{max(env):.3f}")
+    words = {0: "none", 1: "one", 2: "two", 3: "three", 4: "four", 5: "five"}
+    macro("kThreeFreshNdWord", words[len(nd)])
+    macro("kThreeFreshDomWord", words[len(fresh) - len(nd)])
+    if nd:
+        best = min(nd, key=lambda r: f(r, "envelope_ratio"))
+        macro("kThreeBestSeed", best["train_seed"])
+        macro("kThreeBestEnv", f"{f(best, 'envelope_ratio'):.3f}")
+        macro("kThreeBestLo", f"{f(best, 'ci_lo'):.3f}")
+        macro("kThreeBestHi", f"{f(best, 'ci_hi'):.3f}")
+        macro("kThreeBestPnd", f"{100 * f(best, 'p_not_dominated'):.0f}")
+        macro("kThreeBestSave", num(f(best, "dv_mps") * (1 - f(best, "envelope_ratio")), 2))
+        macro("kThreeBestPct", num(100 * (1 - f(best, "envelope_ratio")), 1))
+        macro("kThreeBestDist", f"{f(best, 'mean_dist_km'):.0f}")
+    # the two seeds the paper used to report, before -> after (fresh seeds)
+    for s, tag in (("2", "Two"), ("4", "Four")):
+        r = next(r for r in fresh if r["train_seed"] == s)
+        macro(f"kThreeBefore{tag}", f"{f(conf[f'ppo_drm_s{s}'], 'envelope_ratio'):.3f}")
+        macro(f"kThreeAfter{tag}", f"{f(r, 'envelope_ratio'):.3f}")
+    # process noise of the Harmonic-LQR designs that dominate DR-PPO-M on fresh seeds
+    bws = sorted({float(r["dominating_design"].split("|")[4]) for r in fresh
+                  if r["dominating_design"]})
+    macro("kThreeBwBestMin", sci(bws[0], 1))
+    macro("kThreeBwBestMax", sci(bws[-1], 1))
+    agn = [f(r, "agnostic_ratio") for r in fresh]
+    macro("kThreeAgnMin", num(min(agn), 2))
+    macro("kThreeAgnMax", num(max(agn), 2))
+    macro("kThreeAgnSaveMin", f"{100 * (1 - max(agn)):.0f}")
+    macro("kThreeAgnSaveMax", f"{100 * (1 - min(agn)):.0f}")
+    harm = [f(r, "Harmonic-LQR_ratio") for r in fresh]
+    macro("kThreeHarmMin", f"{min(harm):.3f}")
+    macro("kThreeHarmMax", f"{max(harm):.3f}")
+    # which tuned parameter matters: best Harmonic-LQR design per agent
+    fam_n = {fam: sum(r["family"] == fam for r in final)
+             for fam in ("Harmonic-LQR", "Bias-LQR", "LQI", "LQR")}
+    macro("kThreeFinalHarm", str(fam_n["Harmonic-LQR"]))
+    lines = []
+    for r in fresh:
+        t = test[r["train_seed"]]
+        before = (f"{f(conf[r['model']], 'envelope_ratio'):.3f}" if r["model"] in conf
+                  else "--")                  # scripts/20 re-tested only seeds 2 and 4
+        lines.append(
+            rf"{r['train_seed']} & {f(r, 'mean_dist_km'):.0f} & {f(r, 'dv_mps'):.3f} & "
+            rf"{before} & {f(r, 'envelope_ratio'):.3f} & "
+            rf"[{f(r, 'ci_lo'):.3f}, {f(r, 'ci_hi'):.3f}] & "
+            rf"{100 * f(r, 'p_not_dominated'):.0f}\,\% & {'no' if f(r, 'dominated') else 'yes'} & "
+            rf"{f(t, 'envelope_ratio_before'):.3f} & {f(t, 'envelope_ratio'):.3f} & "
+            rf"{'no' if f(t, 'dominated') else 'yes'} \\")
+    write_table("tab_k3.tex", r"""
+\begin{tabular}{rrrccccc@{\hspace{1.2em}}ccc}
+\toprule
+ & & & \multicolumn{5}{c}{fresh seeds 200--299} & \multicolumn{3}{c}{test seeds 100--119} \\
+\cmidrule(lr){4-8}\cmidrule(lr){9-11}
+seed & km & $\dv$ & before & after & 95\,\% CI & $P$(not dom.) & not dom. & before & after & not dom. \\
+\midrule
+""" + "\n".join(lines) + r"""
+\bottomrule
+\end{tabular}""")
+
+
 # ---------------------------------------------------------------- 9. flown missions
 def missions():
     """Phase 9 (scripts/17): yearly delta-v of flown missions vs. this work at k = 1."""
@@ -1134,7 +1237,7 @@ Mission / controller & Source & $\dv$ per year [m/s] & Orbit / task \\
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     for step in (dynamics, lqr_phase3, comparison, ratios, robustness, thrust_logs,
-                 hyperparameters, mismatch, phase8, lstm, moon, missions, figures, mismatch_figure, phase8_figure):
+                 hyperparameters, mismatch, phase8, lstm, moon, k3, missions, figures, mismatch_figure, phase8_figure):
         step()
         print(f"{step.__name__} done", flush=True)
     text = "% Generated by scripts/11_paper_assets.py -- do not edit by hand.\n"
